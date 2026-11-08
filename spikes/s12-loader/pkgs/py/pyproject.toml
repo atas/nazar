@@ -1,0 +1,8 @@
+[project]
+name = "s12py"
+version = "1.0.0"
+[project.scripts]
+s12-py = "s12py:main"
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"

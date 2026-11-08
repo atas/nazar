@@ -1,0 +1,5 @@
+module CNazarConformance [system] {
+    header "../../../build/libnazar-conformance.h"
+    link "nazar-conformance"
+    export *
+}

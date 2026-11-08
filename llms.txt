@@ -1,0 +1,17 @@
+# nazar
+
+> nazar is a macOS SSH agent and secrets broker. Its SSH keys, API tokens, Kubernetes CAs and AWS CAs (IAM Roles Anywhere) live in the Secure Enclave, and per-key rules decide which apps (by code signature) may use each one, and whether the user approves with Touch ID or an Allow dialog. An AI agent may inspect everything and propose changes; only the person at the Mac approves them.
+
+An agent helping a user with nazar: read the agent rules first. A refusal is the user's decision, never something to work around; a change that loosens access is made only with `--allow-loosen-access`, which asks for the user's Touch ID at once, so an agent prints the command for the user instead of running it (without the flag it is refused and only shown).
+
+## Docs
+
+- [AGENTS.md](https://github.com/atas/nazar/blob/main/AGENTS.md): rules for an agent on a Mac that uses nazar (what is safe to run, refusals, staged changes, secrets), and for agents working on the repo
+- [Agent skill](https://github.com/atas/nazar/blob/main/skills/nazar/SKILL.md): the same rules, a setup checklist and the everyday tasks, as an Agent Skill for Claude Code and Codex
+- [User guide](https://github.com/atas/nazar/blob/main/docs/CLI.md): setup, keys, rules, secrets, Kubernetes, AWS, every command and exit code
+- [Guide](https://github.com/atas/nazar/blob/main/docs/GUIDE.md): how it works, an example config, and worked migrations (a GitHub token, an MCP server's key)
+
+## Optional
+
+- [Threat model](https://github.com/atas/nazar/blob/main/docs/THREAT-MODEL.md): what nazar protects against and what it does not
+- [Design](https://github.com/atas/nazar/blob/main/docs/design/nazar-design.md): the full design spec

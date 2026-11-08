@@ -1,0 +1,1653 @@
+=== nazar []
+exit 2
+--- stdout
+--- stderr
+nazar: a command is required
+<usage>
+=== nazar ["bogus"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown command "bogus"
+<usage>
+=== nazar ["--bogus" "status"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown command "--bogus"
+<usage>
+=== nazar ["sssh-key"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown command "sssh-key"
+
+Did you mean this?
+	ssh-key
+
+<usage>
+=== nazar ["-json" "version"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown command "-json"
+<usage>
+=== nazar ["--json" "bogus"]
+exit 2
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Problem","code":"usage","message":"unknown command \"bogus\""}
+--- stderr
+=== nazar ["help"]
+exit 0
+--- stdout
+<usage>
+--- stderr
+=== nazar ["-h"]
+exit 0
+--- stdout
+<usage>
+--- stderr
+=== nazar ["--help"]
+exit 0
+--- stdout
+<usage>
+--- stderr
+=== nazar ["help" "ssh-key"]
+exit 0
+--- stdout
+<help: nazar ssh-key>
+--- stderr
+=== nazar ["help" "ssh-key" "rule" "add"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule add>
+--- stderr
+=== nazar ["--json" "help"]
+exit 0
+--- stdout
+<usage>
+--- stderr
+=== nazar ["version"]
+exit 0
+--- stdout
+nazar 0.1.0-dev
+--- stderr
+=== nazar ["--json" "version"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Version","version":"0.1.0-dev"}
+--- stderr
+=== nazar ["version" "--json"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Version","version":"0.1.0-dev"}
+--- stderr
+=== nazar ["version" "extra"]
+exit 0
+--- stdout
+nazar 0.1.0-dev
+--- stderr
+=== nazar ["-y" "version"]
+exit 0
+--- stdout
+nazar 0.1.0-dev
+--- stderr
+=== nazar ["--yes" "version"]
+exit 0
+--- stdout
+nazar 0.1.0-dev
+--- stderr
+=== nazar ["version" "-h"]
+exit 0
+--- stdout
+<help: nazar version>
+--- stderr
+=== nazar ["completion"]
+exit 2
+--- stdout
+--- stderr
+nazar: completion: expected one shell: bash, zsh or fish
+nazar help completion: its flags and examples
+=== nazar ["completion" "zsh"]
+exit 0
+--- stdout
+<completion script: zsh>
+--- stderr
+=== nazar ["ssh-key"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key needs a subcommand: create, list, pubkey, delete, rules, rule, set
+nazar help ssh-key: its flags and examples
+=== nazar ["ssh-key" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key>
+--- stderr
+=== nazar ["ssh-key" "--help"]
+exit 0
+--- stdout
+<help: nazar ssh-key>
+--- stderr
+=== nazar ["ssh-key" "creat" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown ssh-key subcommand "creat"
+
+Did you mean this?
+	create
+
+nazar help ssh-key: its flags and examples
+=== nazar ["ssh-key" "list"]
+exit 0
+--- stdout
+NAME    TYPE                 FINGERPRINT  RULES
+github  ecdsa-sha2-nistp256  SHA256:abc   1
+--- stderr
+=== nazar ["--json" "ssh-key" "list"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"SSHKeyList","items":[{"apiVersion":"nazar/v1","kind":"SSHKey","name":"github","type":"ecdsa-sha2-nistp256","fingerprint":"SHA256:abc","broken":false,"userPresence":false,"whileLocked":true,"configured":true,"rules":["1: apps=iterm gate=login","fallback: gate=block"],"created":"0001-01-01T00:00:00Z","usable":true,"warnings":null,"policy":{"apiVersion":"nazar/v1","kind":"SSHKeyRules","name":"","configured":true,"staged":false,"configHash":"","rules":[{"index":1,"apps":[{"kind":"app","ref":"app:com.googlecode.iterm2"}],"to":[],"policy":{"scope":"session","gate":"login"}}],"fallback":{"scope":"use","gate":"block"},"fallbackSource":"key-gate"}}],"since":"0001-01-01T00:00:00Z"}
+--- stderr
+=== nazar ["ssh-key" "list" "--json"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"SSHKeyList","items":[{"apiVersion":"nazar/v1","kind":"SSHKey","name":"github","type":"ecdsa-sha2-nistp256","fingerprint":"SHA256:abc","broken":false,"userPresence":false,"whileLocked":true,"configured":true,"rules":["1: apps=iterm gate=login","fallback: gate=block"],"created":"0001-01-01T00:00:00Z","usable":true,"warnings":null,"policy":{"apiVersion":"nazar/v1","kind":"SSHKeyRules","name":"","configured":true,"staged":false,"configHash":"","rules":[{"index":1,"apps":[{"kind":"app","ref":"app:com.googlecode.iterm2"}],"to":[],"policy":{"scope":"session","gate":"login"}}],"fallback":{"scope":"use","gate":"block"},"fallbackSource":"key-gate"}}],"since":"0001-01-01T00:00:00Z"}
+--- stderr
+=== nazar ["ssh-key" "--json" "list"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"SSHKeyList","items":[{"apiVersion":"nazar/v1","kind":"SSHKey","name":"github","type":"ecdsa-sha2-nistp256","fingerprint":"SHA256:abc","broken":false,"userPresence":false,"whileLocked":true,"configured":true,"rules":["1: apps=iterm gate=login","fallback: gate=block"],"created":"0001-01-01T00:00:00Z","usable":true,"warnings":null,"policy":{"apiVersion":"nazar/v1","kind":"SSHKeyRules","name":"","configured":true,"staged":false,"configHash":"","rules":[{"index":1,"apps":[{"kind":"app","ref":"app:com.googlecode.iterm2"}],"to":[],"policy":{"scope":"session","gate":"login"}}],"fallback":{"scope":"use","gate":"block"},"fallbackSource":"key-gate"}}],"since":"0001-01-01T00:00:00Z"}
+--- stderr
+=== nazar ["ssh-key" "list" "-y"]
+exit 0
+--- stdout
+NAME    TYPE                 FINGERPRINT  RULES
+github  ecdsa-sha2-nistp256  SHA256:abc   1
+--- stderr
+=== nazar ["ssh-key" "list" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key list>
+--- stderr
+=== nazar ["ssh-key" "list" "extra"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key list: expected 0 argument(s), got 1
+nazar help ssh-key list: its flags and examples
+=== nazar ["ssh-key" "create"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key create: expected 1 argument(s), got 0
+nazar help ssh-key create: its flags and examples
+=== nazar ["ssh-key" "create" "work"]
+exit 0
+--- stdout
+created SSH key work (SHA256:abc)
+works while the Mac is locked too, once you have logged in since it started (fixed for its life)
+public key: $HOME/.nazar/keys/work.pub
+its rules (nazar ssh-key rules work):
+  1: apps=iterm gate=login
+  fallback: gate=block
+--- stderr
+=== nazar ["ssh-key" "create" "work" "--always-ask"]
+exit 0
+--- stdout
+created SSH key work (SHA256:abc)
+asks every time (chip): Touch ID on every use, enforced by the chip
+only when unlocked: the chip refuses it while the Mac is locked (fixed for its life)
+public key: $HOME/.nazar/keys/work.pub
+its rules (nazar ssh-key rules work):
+  1: apps=iterm gate=login
+  fallback: gate=block
+--- stderr
+=== nazar ["ssh-key" "create" "--only-when-unlocked" "work"]
+exit 0
+--- stdout
+created SSH key work (SHA256:abc)
+only when unlocked: the chip refuses it while the Mac is locked (fixed for its life)
+public key: $HOME/.nazar/keys/work.pub
+its rules (nazar ssh-key rules work):
+  1: apps=iterm gate=login
+  fallback: gate=block
+--- stderr
+=== nazar ["ssh-key" "create" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key create>
+--- stderr
+=== nazar ["ssh-key" "create" "work" "--gate" "dialog"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key create: flag provided but not defined: -gate
+nazar help ssh-key create: its flags and examples
+=== nazar ["ssh-key" "create" "../x"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key create: invalid key name "../x" (letters, digits, '.', '_' and '-'; it becomes keys/<name>.pub)
+nazar help ssh-key create: its flags and examples
+=== nazar ["ssh-key" "create" "work" "--always-ask=false"]
+exit 0
+--- stdout
+created SSH key work (SHA256:abc)
+works while the Mac is locked too, once you have logged in since it started (fixed for its life)
+public key: $HOME/.nazar/keys/work.pub
+its rules (nazar ssh-key rules work):
+  1: apps=iterm gate=login
+  fallback: gate=block
+--- stderr
+=== nazar ["ssh-key" "create" "-always-ask" "work"]
+exit 0
+--- stdout
+created SSH key work (SHA256:abc)
+asks every time (chip): Touch ID on every use, enforced by the chip
+only when unlocked: the chip refuses it while the Mac is locked (fixed for its life)
+public key: $HOME/.nazar/keys/work.pub
+its rules (nazar ssh-key rules work):
+  1: apps=iterm gate=login
+  fallback: gate=block
+--- stderr
+=== nazar ["ssh-key" "pubkey" "github"]
+exit 0
+--- stdout
+ecdsa-sha2-nistp256 AAAAE2VjZHNh github
+--- stderr
+=== nazar ["ssh-key" "pubkey"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key pubkey: expected 1 argument(s), got 0
+nazar help ssh-key pubkey: its flags and examples
+=== nazar ["ssh-key" "delete" "github"]
+exit 0
+--- stdout
+deleted SSH key github
+--- stderr
+=== nazar ["ssh-key" "rules" "github"]
+exit 0
+--- stdout
+#       APPS                       TO  SCOPE    GATE   EXPIRE
+1       app:com.googlecode.iterm2      session  login  
+others                                 use      block  
+others: callers no rule matches get key-gate
+--- stderr
+=== nazar ["--json" "ssh-key" "rules" "github"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"SSHKeyRules","name":"github","configured":true,"staged":false,"configHash":"","rules":[{"index":1,"apps":[{"kind":"app","ref":"app:com.googlecode.iterm2"}],"to":[],"policy":{"scope":"session","gate":"login"}}],"fallback":{"scope":"use","gate":"block"},"fallbackSource":"key-gate"}
+--- stderr
+=== nazar ["ssh-key" "rules" "a/b"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rules: invalid key name "a/b"
+nazar help ssh-key rules: its flags and examples
+=== nazar ["ssh-key" "rules" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key rules>
+--- stderr
+=== nazar ["ssh-key" "rule"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule needs a subcommand: add, set, remove
+nazar help ssh-key rule: its flags and examples
+=== nazar ["ssh-key" "rule" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule>
+--- stderr
+=== nazar ["ssh-key" "rule" "ad"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown ssh-key rule subcommand "ad"
+
+Did you mean this?
+	add
+
+nazar help ssh-key rule: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "app:com.googlecode.iterm2" "--gate" "login" "--scope" "session"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key rule add github --apps app:com.googlecode.iterm2 --gate login --scope session --allow-loosen-access
+=== nazar ["--json" "ssh-key" "rule" "add" "github" "--apps" "any" "--to" "signed:apple:com.apple.git-remote-http" "--gate" "dialog" "--expire" "8h" "--at" "1"]
+exit 2
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Problem","code":"usage","message":"this change loosens access; nothing was changed","details":["ssh:github: added rule 2: apps=[any] to=[] gate=dialog","loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)"],"fix":"nazar ssh-key rule add github --apps any --to signed:apple:com.apple.git-remote-http --gate dialog --expire 8h --at 1 --allow-loosen-access"}
+--- stderr
+=== nazar ["ssh-key" "rule" "add" "github" "-apps=any" "-gate=none" "-scope=app"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key rule add github -apps=any -gate=none -scope=app --allow-loosen-access
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "any" "--gate" "dialog" "--allow-loosen-access"]
+exit 0
+--- stdout
+config.yaml updated; the change loosens access, so it needs your approval:
+  a rule
+approve it with Touch ID / Watch / password
+approved; the change is in force
+--- stderr
+=== nazar ["--json" "ssh-key" "rule" "add" "github" "--apps" "any" "--gate" "dialog" "--allow-loosen-access"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"ConfigEdit","op":"rule.add","key":"github","path":"config.yaml","hash":"","changed":true,"applied":false,"staged":{"apiVersion":"nazar/v1","kind":"ConfigDiff","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","loosens":false,"applied":false,"changes":["a rule"]},"problems":null}
+{"apiVersion":"nazar/v1","kind":"ConfigDiff","hash":"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef","loosens":false,"applied":true,"changes":["a rule"]}
+--- stderr
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "app:my tools.x" "--gate" "none"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key rule add github --apps 'app:my tools.x' --gate none --allow-loosen-access
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "app:com.x!y" "--gate" "none"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, add --allow-loosen-access to the command (Touch ID)
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "any" "--gate" "dialog" "--allow-loosen-access=false"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key rule add github --apps any --gate dialog --allow-loosen-access
+=== nazar ["ssh-key" "rule" "add" "github" "--gate" "login"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: --apps and --gate are required
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule add>
+--- stderr
+=== nazar ["ssh-key" "rule" "add" "--help"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule add>
+--- stderr
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: --apps and --gate are required
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "github" "--bogus" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: flag provided but not defined: -bogus
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "x" "--gate" "login" "--" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: expected 1 argument(s), got 2
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "github" "-help"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule add>
+--- stderr
+=== nazar ["ssh-key" "rule" "add" "github" "--help=1"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule add>
+--- stderr
+=== nazar ["ssh-key" "rule" "add" "github" "--gate"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: flag needs an argument: -gate
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "x" "--gate" "maybe"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: --gate must be login, dialog, none or block, not "maybe"
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "add" "github" "--apps" "x" "--gate" "login" "--no-to"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule add: flag provided but not defined: -no-to
+nazar help ssh-key rule add: its flags and examples
+=== nazar ["ssh-key" "rule" "set" "github" "1" "--gate" "dialog"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key rule set github 1 --gate dialog --allow-loosen-access
+=== nazar ["ssh-key" "rule" "set" "github" "0" "--gate" "dialog"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule set: the rule number must be a rule number from 1, not "0"
+nazar help ssh-key rule set: its flags and examples
+=== nazar ["ssh-key" "rule" "set" "github" "1"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule set: give at least one of --apps, --to, --no-to, --scope, --gate, --expire, --no-expire
+nazar help ssh-key rule set: its flags and examples
+=== nazar ["ssh-key" "rule" "set" "github" "1" "--no-to" "--to" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule set: give --to or --no-to, not both
+nazar help ssh-key rule set: its flags and examples
+=== nazar ["ssh-key" "rule" "set" "github" "1" "--no-expire"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key rule set github 1 --no-expire --allow-loosen-access
+=== nazar ["ssh-key" "rule" "set" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule set>
+--- stderr
+=== nazar ["ssh-key" "rule" "remove" "github" "1"]
+exit 0
+--- stdout
+config.yaml updated; the change is in force
+--- stderr
+=== nazar ["ssh-key" "rule" "remove" "github"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule remove: expected 2 argument(s), got 1
+nazar help ssh-key rule remove: its flags and examples
+=== nazar ["ssh-key" "rule" "remove" "github" "1" "--gate" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key rule remove: flag provided but not defined: -gate
+nazar help ssh-key rule remove: its flags and examples
+=== nazar ["ssh-key" "rule" "remove" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key rule remove>
+--- stderr
+=== nazar ["ssh-key" "set" "github" "--gate" "block"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key set github --gate block --allow-loosen-access
+=== nazar ["ssh-key" "set" "github" "--gate" "none"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key set: a key's own gate applies to every caller, so it can't be none; add a rule with --apps instead
+nazar help ssh-key set: its flags and examples
+=== nazar ["ssh-key" "set" "github"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key set: give at least one of --scope, --gate, --expire, --no-expire
+nazar help ssh-key set: its flags and examples
+=== nazar ["ssh-key" "set" "github" "--scope" "forever"]
+exit 2
+--- stdout
+--- stderr
+nazar: ssh-key set: --scope must be use, session or app, not "forever"
+nazar help ssh-key set: its flags and examples
+=== nazar ["ssh-key" "set" "github" "--expire" "8h" "--if-hash" "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar ssh-key set github --expire 8h --if-hash 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef --allow-loosen-access
+=== nazar ["ssh-key" "set" "-h"]
+exit 0
+--- stdout
+<help: nazar ssh-key set>
+--- stderr
+=== nazar ["secret"]
+exit 2
+--- stdout
+--- stderr
+nazar: secret needs a subcommand: add, list, rm, rule
+nazar help secret: its flags and examples
+=== nazar ["secret" "-h"]
+exit 0
+--- stdout
+<help: nazar secret>
+--- stderr
+=== nazar ["secret" "lst"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown secret subcommand "lst"
+
+Did you mean this?
+	list
+
+nazar help secret: its flags and examples
+=== nazar ["secret" "list"]
+exit 0
+--- stdout
+NAME      CREATED  RULES  STATE
+GH_TOKEN  -        1      stored
+--- stderr
+=== nazar ["--json" "secret" "list"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"SecretList","items":[{"apiVersion":"nazar/v1","kind":"Secret","name":"GH_TOKEN","deliver":["helper"],"rules":["1: apps=iterm gate=login"],"userPresence":false,"whileLocked":true,"configured":true,"stored":true,"broken":false,"warnings":null}]}
+--- stderr
+=== nazar ["secret" "list" "-h"]
+exit 0
+--- stdout
+<help: nazar secret list>
+--- stderr
+=== nazar ["secret" "rm" "GH_TOKEN"]
+exit 0
+--- stdout
+deleted secret GH_TOKEN
+--- stderr
+=== nazar ["secret" "rm"]
+exit 2
+--- stdout
+--- stderr
+nazar: secret rm: expected 1 argument(s), got 0
+nazar help secret rm: its flags and examples
+=== nazar ["secret" "rm" "-h"]
+exit 0
+--- stdout
+<help: nazar secret rm>
+--- stderr
+=== nazar ["secret" "add" "NOTES"]
+exit 2
+--- stdout
+--- stderr
+nazar: secret add: no stdin to read the value from
+nazar help secret add: its flags and examples
+=== nazar ["secret" "add" "NOTES"] stdin="value\n"
+exit 0
+--- stdout
+added secret NOTES
+deliver: helper
+works while the Mac is locked too, once you have logged in since it started (fixed for its life)
+its rules (config.yaml, secrets.NOTES):
+  1: apps=iterm gate=login
+--- stderr
+=== nazar ["secret" "add" "bad name"] stdin="value"
+exit 2
+--- stdout
+--- stderr
+nazar: secret add: invalid secret name "bad name" (letters, digits, _ . - and /, at most 64 bytes)
+nazar help secret add: its flags and examples
+=== nazar ["--json" "secret" "add" "NOTES" "--only-when-unlocked"] stdin="value"
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Secret","name":"NOTES","deliver":["helper"],"rules":["1: apps=iterm gate=login"],"userPresence":false,"whileLocked":false,"configured":true,"stored":true,"broken":false,"warnings":null}
+--- stderr
+=== nazar ["secret" "add" "NOTES"]
+exit 2
+--- stdout
+--- stderr
+nazar: secret add: no stdin to read the value from
+nazar help secret add: its flags and examples
+=== nazar ["secret" "add" "-h"] stdin="value"
+exit 0
+--- stdout
+<help: nazar secret add>
+--- stderr
+=== nazar ["secret" "add" "NOTES" "--value" "x"] stdin="value"
+exit 2
+--- stdout
+--- stderr
+nazar: secret add: flag provided but not defined: -value
+nazar help secret add: its flags and examples
+=== nazar ["secret" "rule"]
+exit 2
+--- stdout
+--- stderr
+nazar: secret rule needs a subcommand: add, set, remove
+nazar help secret rule: its flags and examples
+=== nazar ["secret" "rule" "add" "GH_TOKEN" "--apps" "any" "--gate" "dialog"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar secret rule add GH_TOKEN --apps any --gate dialog --allow-loosen-access
+=== nazar ["secret" "rule" "remove" "GH_TOKEN" "1"]
+exit 0
+--- stdout
+config.yaml updated; the change is in force
+--- stderr
+=== nazar ["secret" "rule" "set" "GH_TOKEN" "1" "--to" "signed:apple:com.apple.git-remote-http"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar secret rule set GH_TOKEN 1 --to signed:apple:com.apple.git-remote-http --allow-loosen-access
+=== nazar ["secret" "rule" "add" "-h"]
+exit 0
+--- stdout
+<help: nazar secret rule add>
+--- stderr
+=== nazar ["get" "GH_TOKEN"]
+exit 3
+--- stdout
+--- stderr
+nazar: secret GH_TOKEN: no rule allows this caller
+=== nazar ["--json" "get" "GH_TOKEN"]
+exit 3
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Problem","code":"refused","message":"secret GH_TOKEN: no rule allows this caller"}
+--- stderr
+=== nazar ["get"]
+exit 2
+--- stdout
+--- stderr
+nazar: get: expected 1 argument(s), got 0
+nazar help get: its flags and examples
+=== nazar ["get" "a" "b"]
+exit 2
+--- stdout
+--- stderr
+nazar: get: expected 1 argument(s), got 2
+nazar help get: its flags and examples
+=== nazar ["get" "bad name"]
+exit 2
+--- stdout
+--- stderr
+nazar: get: invalid secret name "bad name"
+nazar help get: its flags and examples
+=== nazar ["get" "-h"]
+exit 0
+--- stdout
+<help: nazar get>
+--- stderr
+=== nazar ["run"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: the command goes after --: nazar run --secret NAME -- command
+nazar help run: its flags and examples
+=== nazar ["run" "--secret" "X"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: the command goes after --: nazar run --secret NAME -- command
+nazar help run: its flags and examples
+=== nazar ["run" "--secret" "X" "--"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: a command is required after --
+nazar help run: its flags and examples
+=== nazar ["run" "--" "cmd"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: --secret NAME is required
+nazar help run: its flags and examples
+=== nazar ["run" "--secret" "X" "--" "node" "-h"]
+exit 1
+--- stdout
+--- stderr
+nazar: run: not available in this build yet
+=== nazar ["run" "--secret" "X" "--" "node" "--json" "--help" "-y"]
+exit 1
+--- stdout
+--- stderr
+nazar: run: not available in this build yet
+=== nazar ["run" "--json" "--secret" "X" "--" "cmd" "--json"]
+exit 1
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Problem","code":"error","message":"run: not available in this build yet"}
+--- stderr
+=== nazar ["run" "-h"]
+exit 0
+--- stdout
+<help: nazar run>
+--- stderr
+=== nazar ["run" "--help"]
+exit 0
+--- stdout
+<help: nazar run>
+--- stderr
+=== nazar ["run" "--secret" "X" "-h" "--" "cmd"]
+exit 0
+--- stdout
+<help: nazar run>
+--- stderr
+=== nazar ["run" "--secret" "-h" "--" "cmd"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: invalid secret name "-h"
+nazar help run: its flags and examples
+=== nazar ["run" "--secret" "bad name" "--" "cmd"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: invalid secret name "bad name"
+nazar help run: its flags and examples
+=== nazar ["run" "--secret" "X" "--secret" "Y" "--" "cmd"]
+exit 2
+--- stdout
+--- stderr
+nazar: run: invalid value "Y" for flag -secret: given more than once
+nazar help run: its flags and examples
+=== nazar ["k8s"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s: expected a subcommand (ca, list, rule, forget, credential)
+nazar help k8s: its flags and examples
+=== nazar ["k8s" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s>
+--- stderr
+=== nazar ["k8s" "lst"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s: unknown subcommand "lst"
+
+Did you mean this?
+	list
+
+nazar help k8s: its flags and examples
+=== nazar ["k8s" "list"]
+exit 0
+--- stdout
+hydra-nazar
+  not in config.yaml: 
+--- stderr
+=== nazar ["--json" "k8s" "list"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"K8sContextList","items":[{"apiVersion":"nazar/v1","kind":"K8sContext","name":"hydra-nazar","configured":false,"rules":[],"warnings":null,"state":"","ca":null,"caBroken":false}]}
+--- stderr
+=== nazar ["k8s" "list" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s list>
+--- stderr
+=== nazar ["k8s" "ca"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s ca: expected create or show
+nazar help k8s ca: its flags and examples
+=== nazar ["k8s" "ca" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s ca>
+--- stderr
+=== nazar ["k8s" "ca" "creat"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s ca: unknown subcommand "creat"
+
+Did you mean this?
+	create
+
+nazar help k8s ca: its flags and examples
+=== nazar ["k8s" "ca" "create"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s ca create: without a terminal, give the context and the server (nazar k8s ca create <context> <server>); the server's CA is then the one of the kubeconfig cluster entry with exactly that server
+nazar help k8s ca create: its flags and examples
+=== nazar ["k8s" "ca" "create" "a" "b" "c"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s ca create: expected at most a context and a server, got 3 arguments
+nazar help k8s ca create: its flags and examples
+=== nazar ["k8s" "ca" "create" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s ca create>
+--- stderr
+=== nazar ["k8s" "ca" "create" "hydra-nazar" "https://hydra.example:16443" "--only-when-unlocked"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s ca create: no cluster in the kubeconfig has the server "https://hydra.example:16443" exactly; run it at a terminal to give the server's CA (on microk8s: /var/snap/microk8s/current/certs/ca.crt on the node)
+nazar help k8s ca create: its flags and examples
+=== nazar ["k8s" "ca" "show" "hydra-nazar"]
+exit 0
+--- stdout
+-----BEGIN CERTIFICATE-----
+MIIB
+-----END CERTIFICATE-----
+--- stderr
+=== nazar ["k8s" "ca" "show" "hydra-nazar" "--microk8s"]
+exit 0
+--- stdout
+On the microk8s node, as a user who can sudo (read each line before you run it):
+
+1. Save the nazar CA:
+sudo tee /var/snap/microk8s/current/certs/nazar-ca-hydra-nazar.crt >/dev/null <<'EOF'
+-----BEGIN CERTIFICATE-----
+MIIB
+-----END CERTIFICATE-----
+EOF
+
+2. Make the client CA bundle, the cluster CA and every nazar CA saved here together:
+sudo sh -c 'cat /var/snap/microk8s/current/certs/ca.crt /var/snap/microk8s/current/certs/nazar-ca-*.crt > /var/snap/microk8s/current/certs/client-ca.crt'
+
+3. Point the API server at the bundle, and check the line:
+sudo sed -i 's|^--client-ca-file=.*|--client-ca-file=${SNAP_DATA}/certs/client-ca.crt|' /var/snap/microk8s/current/args/kube-apiserver
+grep client-ca-file /var/snap/microk8s/current/args/kube-apiserver
+
+4. Restart the API server:
+sudo snap restart microk8s.daemon-kubelite
+
+microk8s refresh-certs rewrites ca.crt: run step 2 again after it. To stop trusting a
+nazar CA, delete its nazar-ca-<context>.crt and run steps 2 and 4 again.
+nazar never touches the cluster: these steps are yours to run.
+--- stderr
+=== nazar ["k8s" "ca" "show"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s ca show: expected 1 argument(s), got 0
+nazar help k8s ca show: its flags and examples
+=== nazar ["k8s" "ca" "show" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s ca show>
+--- stderr
+=== nazar ["k8s" "forget"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s forget: expected 1 argument(s), got 0
+nazar help k8s forget: its flags and examples
+=== nazar ["k8s" "forget" "hydra-nazar"]
+exit 0
+--- stdout
+nazar forgot hydra-nazar: it has no CA and no config.yaml entry now.
+--- stderr
+=== nazar ["k8s" "forget" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s forget>
+--- stderr
+=== nazar ["k8s" "rule" "add" "hydra-nazar" "--apps" "any" "--gate" "login"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar k8s rule add hydra-nazar --apps any --gate login --allow-loosen-access
+=== nazar ["k8s" "rule" "add" "hydra-nazar" "--apps" "any" "--gate" "login" "--to" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s rule add: k8s rules take no --to: the program that runs the plugin (kubectl, helm …) receives the credential
+nazar help k8s rule add: its flags and examples
+=== nazar ["k8s" "rule" "add" "hydra-nazar" "--to" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s rule add: k8s rules take no --to: the program that runs the plugin (kubectl, helm …) receives the credential
+nazar help k8s rule add: its flags and examples
+=== nazar ["k8s" "rule" "set" "hydra-nazar" "1" "--no-to"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s rule set: k8s rules take no --to: the program that runs the plugin (kubectl, helm …) receives the credential
+nazar help k8s rule set: its flags and examples
+=== nazar ["k8s" "rule" "set" "hydra-nazar" "1"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s rule set: give at least one of --apps, --scope, --gate, --expire, --no-expire
+nazar help k8s rule set: its flags and examples
+=== nazar ["k8s" "rule" "remove" "hydra-nazar" "1"]
+exit 0
+--- stdout
+config.yaml updated; the change is in force
+--- stderr
+=== nazar ["k8s" "rule" "add" "-h"]
+exit 0
+--- stdout
+<help: nazar k8s rule add>
+--- stderr
+=== nazar ["k8s" "credential"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s credential: expected 1 argument(s), got 0
+=== nazar ["k8s" "credential" "hydra-nazar"]
+exit 2
+--- stdout
+--- stderr
+nazar: no KUBERNETES_EXEC_INFO: nazar k8s credential is run by kubectl's exec plugin
+=== nazar ["k8s" "credential" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s credential: see `nazar help`
+=== nazar ["k8s" "credential" "--help"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s credential: see `nazar help`
+=== nazar ["--json" "k8s" "credential" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s credential takes no --json: its stdout is the ExecCredential
+=== nazar ["k8s" "credential" "hydra-nazar" "--json"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s credential takes no --json: its stdout is the ExecCredential
+=== nazar ["k8s" "credential" "a" "b"]
+exit 2
+--- stdout
+--- stderr
+nazar: k8s credential: expected 1 argument(s), got 2
+=== nazar ["aws"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws: expected a subcommand (ca, list, rule, forget, credential)
+nazar help aws: its flags and examples
+=== nazar ["aws" "-h"]
+exit 0
+--- stdout
+<help: nazar aws>
+--- stderr
+=== nazar ["aws" "lst"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws: unknown subcommand "lst"
+
+Did you mean this?
+	list
+
+nazar help aws: its flags and examples
+=== nazar ["aws" "list"]
+exit 0
+--- stdout
+dev
+  CN=you-nazar, sessions of 1h
+  rule 1: apps=iterm gate=login
+  rule fallback: gate=block
+  aws.dev is not connected yet: add trustAnchorArn, profileArn and roleArn (nazar aws ca create printed the steps)
+  CA: SHA-256 ab, /k/aws-ca-dev.crt
+--- stderr
+=== nazar ["--json" "aws" "list"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"AWSEntryList","items":[{"apiVersion":"nazar/v1","kind":"AWSEntry","name":"dev","configured":true,"identity":{"user":"you-nazar"},"duration":"1h","rules":["1: apps=iterm gate=login","fallback: gate=block"],"warnings":null,"state":"not-connected","ca":{"apiVersion":"nazar/v1","kind":"AWSCA","name":"dev","fingerprint":"ab","created":"0001-01-01T00:00:00Z","notAfter":"0001-01-01T00:00:00Z","certFile":"/k/aws-ca-dev.crt","whileLocked":true},"caBroken":false,"remedy":"aws.dev is not connected yet: add trustAnchorArn, profileArn and roleArn (nazar aws ca create printed the steps)"}]}
+--- stderr
+=== nazar ["aws" "list" "-h"]
+exit 0
+--- stdout
+<help: nazar aws list>
+--- stderr
+=== nazar ["aws" "list" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws list: expected 0 argument(s), got 1
+nazar help aws list: its flags and examples
+=== nazar ["aws" "ca"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca: expected create or show
+nazar help aws ca: its flags and examples
+=== nazar ["aws" "ca" "-h"]
+exit 0
+--- stdout
+<help: nazar aws ca>
+--- stderr
+=== nazar ["aws" "ca" "creat"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca: unknown subcommand "creat"
+
+Did you mean this?
+	create
+
+nazar help aws ca: its flags and examples
+=== nazar ["aws" "ca" "create"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca create: expected 1 argument(s), got 0
+nazar help aws ca create: its flags and examples
+=== nazar ["aws" "ca" "create" "a" "b"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca create: expected 1 argument(s), got 2
+nazar help aws ca create: its flags and examples
+=== nazar ["aws" "ca" "create" "-h"]
+exit 0
+--- stdout
+<help: nazar aws ca create>
+--- stderr
+=== nazar ["aws" "ca" "create" "a/b"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca create: invalid entry name "a/b" (letters, digits, . _ -)
+nazar help aws ca create: its flags and examples
+=== nazar ["aws" "ca" "create" "dev" "--only-when-unlocked"]
+exit 1
+--- stdout
+--- stderr
+nazar: aws ca create: can't tell this nazar's absolute path, or it has a character credential_process does not take (letters, digits, - _ . / and spaces)
+=== nazar ["aws" "ca" "create" "dev" "--gate" "login"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca create: flag provided but not defined: -gate
+nazar help aws ca create: its flags and examples
+=== nazar ["aws" "ca" "show" "dev"]
+exit 0
+--- stdout
+-----BEGIN CERTIFICATE-----
+MIIB
+-----END CERTIFICATE-----
+--- stderr
+=== nazar ["--json" "aws" "ca" "show" "dev"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"AWSCA","name":"dev","fingerprint":"ab","created":"0001-01-01T00:00:00Z","notAfter":"0001-01-01T00:00:00Z","certFile":"","certPEM":"-----BEGIN CERTIFICATE-----\nMIIB\n-----END CERTIFICATE-----\n","whileLocked":false}
+--- stderr
+=== nazar ["aws" "ca" "show"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws ca show: expected 1 argument(s), got 0
+nazar help aws ca show: its flags and examples
+=== nazar ["aws" "ca" "show" "-h"]
+exit 0
+--- stdout
+<help: nazar aws ca show>
+--- stderr
+=== nazar ["aws" "forget"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws forget: expected 1 argument(s), got 0
+nazar help aws forget: its flags and examples
+=== nazar ["aws" "forget" "dev"]
+exit 0
+--- stdout
+nazar forgot dev: it has no CA and no config.yaml entry now.
+AWS still trusts the CA's certificate until you disable or delete the trust anchor nazar-dev (nothing can be issued under it any more):
+  aws rolesanywhere disable-trust-anchor --trust-anchor-id <id>
+Remove the credential_process line of [profile dev] from ~/.aws/config too.
+--- stderr
+=== nazar ["aws" "forget" "-h"]
+exit 0
+--- stdout
+<help: nazar aws forget>
+--- stderr
+=== nazar ["aws" "rule" "add" "dev" "--apps" "any" "--gate" "login"]
+exit 2
+--- stdout
+--- stderr
+nazar: this change loosens access; nothing was changed:
+  ssh:github: added rule 2: apps=[any] to=[] gate=dialog
+  loosens ssh:github: requests that got gate=block (fallback) can now get gate=dialog (rule 2)
+to make it, run (Touch ID):
+  nazar aws rule add dev --apps any --gate login --allow-loosen-access
+=== nazar ["aws" "rule" "add" "dev" "--apps" "any" "--gate" "login" "--to" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws rule add: aws rules take no --to: the program that runs credential_process receives the credential
+nazar help aws rule add: its flags and examples
+=== nazar ["aws" "rule" "add" "dev" "--to" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws rule add: aws rules take no --to: the program that runs credential_process receives the credential
+nazar help aws rule add: its flags and examples
+=== nazar ["aws" "rule" "set" "dev" "1" "--no-to"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws rule set: aws rules take no --to: the program that runs credential_process receives the credential
+nazar help aws rule set: its flags and examples
+=== nazar ["aws" "rule" "set" "dev" "1"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws rule set: give at least one of --apps, --scope, --gate, --expire, --no-expire
+nazar help aws rule set: its flags and examples
+=== nazar ["aws" "rule" "remove" "dev" "1"]
+exit 0
+--- stdout
+config.yaml updated; the change is in force
+--- stderr
+=== nazar ["aws" "rule" "add" "-h"]
+exit 0
+--- stdout
+<help: nazar aws rule add>
+--- stderr
+=== nazar ["aws" "rule" "add" "a/b" "--apps" "any" "--gate" "login"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws rule add: invalid entry name "a/b"
+nazar help aws rule add: its flags and examples
+=== nazar ["aws" "credential"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential: expected 1 argument(s), got 0
+=== nazar ["aws" "credential" "dev"]
+exit 5
+--- stdout
+--- stderr
+nazar: nazar-agent isn't running (cannot connect to $HOME/.nazar/run/control.sock: dial unix $HOME/.nazar/run/control.sock: connect: no such file or directory); run `nazar install`
+=== nazar ["aws" "credential" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential: see `nazar help`
+=== nazar ["aws" "credential" "--help"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential: see `nazar help`
+=== nazar ["--json" "aws" "credential" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential takes no --json: its stdout is the credential_process JSON
+=== nazar ["aws" "credential" "dev" "--json"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential takes no --json: its stdout is the credential_process JSON
+=== nazar ["aws" "credential" "a" "b"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential: expected 1 argument(s), got 2
+=== nazar ["aws" "credential" "a/b"]
+exit 2
+--- stdout
+--- stderr
+nazar: aws credential: invalid entry name "a/b"
+=== nazar ["status"]
+exit 0
+--- stdout
+agent socket: 
+no current approvals
+--- stderr
+=== nazar ["--json" "status"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Status","activeHash":"","approvals":[],"pins":null,"agentSocket":""}
+--- stderr
+=== nazar ["status" "--follow"]
+exit 0
+--- stdout
+agent socket: 
+no current approvals
+--- stderr
+=== nazar ["status" "-h"]
+exit 0
+--- stdout
+<help: nazar status>
+--- stderr
+=== nazar ["status" "extra"]
+exit 2
+--- stdout
+--- stderr
+nazar: status: expected 0 argument(s), got 1
+nazar help status: its flags and examples
+=== nazar ["status" "--nope"]
+exit 2
+--- stdout
+--- stderr
+nazar: status: flag provided but not defined: -nope
+nazar help status: its flags and examples
+=== nazar ["revoke"]
+exit 2
+--- stdout
+--- stderr
+nazar: revoke: give exactly one of --all, --key <name>, --session <id> or --app <bundle-id>
+nazar help revoke: its flags and examples
+=== nazar ["revoke" "--all"]
+exit 0
+--- stdout
+revoked 2 approval(s)
+--- stderr
+=== nazar ["revoke" "--key" "github"]
+exit 0
+--- stdout
+revoked 2 approval(s)
+--- stderr
+=== nazar ["revoke" "--session" "s1"]
+exit 0
+--- stdout
+revoked 2 approval(s)
+--- stderr
+=== nazar ["revoke" "--app" "com.x"]
+exit 0
+--- stdout
+revoked 2 approval(s)
+--- stderr
+=== nazar ["revoke" "--all" "--key" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: revoke: give exactly one of --all, --key <name>, --session <id> or --app <bundle-id>
+nazar help revoke: its flags and examples
+=== nazar ["revoke" "--key"]
+exit 2
+--- stdout
+--- stderr
+nazar: revoke: flag needs an argument: -key
+nazar help revoke: its flags and examples
+=== nazar ["revoke" "-h"]
+exit 0
+--- stdout
+<help: nazar revoke>
+--- stderr
+=== nazar ["config"]
+exit 2
+--- stdout
+--- stderr
+nazar: config needs a subcommand: check, apply
+nazar help config: its flags and examples
+=== nazar ["config" "-h"]
+exit 0
+--- stdout
+<help: nazar config>
+--- stderr
+=== nazar ["config" "chek"]
+exit 2
+--- stdout
+--- stderr
+nazar: unknown config subcommand "chek"
+
+Did you mean this?
+	check
+
+nazar help config: its flags and examples
+=== nazar ["config" "check"]
+exit 0
+--- stdout
+warning: no config file; every key is blocked
+$HOME/.nazar/config/config.yaml is valid
+--- stderr
+=== nazar ["--json" "config" "check"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"ConfigCheck","path":"$HOME/.nazar/config/config.yaml","valid":true,"problems":[{"severity":"warning","message":"no config file; every key is blocked"}]}
+--- stderr
+=== nazar ["config" "check" "-h"]
+exit 0
+--- stdout
+<help: nazar config check>
+--- stderr
+=== nazar ["config" "apply"]
+exit 0
+--- stdout
+config change approved and applied
+  a rule
+--- stderr
+=== nazar ["config" "apply" "--hash" "abc"]
+exit 2
+--- stdout
+--- stderr
+nazar: config apply: flag provided but not defined: -hash
+nazar help config apply: its flags and examples
+=== nazar ["config" "apply" "--hash" "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"]
+exit 2
+--- stdout
+--- stderr
+nazar: config apply: flag provided but not defined: -hash
+nazar help config apply: its flags and examples
+=== nazar ["config" "apply" "--hash" "a" "--hash" "b"]
+exit 2
+--- stdout
+--- stderr
+nazar: config apply: flag provided but not defined: -hash
+nazar help config apply: its flags and examples
+=== nazar ["config" "apply" "-h"]
+exit 0
+--- stdout
+<help: nazar config apply>
+--- stderr
+=== nazar ["trust"]
+exit 2
+--- stdout
+--- stderr
+nazar: trust: expected --app <bundle-id>
+nazar help trust: its flags and examples
+=== nazar ["trust" "/bin/ls"]
+exit 2
+--- stdout
+--- stderr
+nazar: trust: a path: rule needs no trust; trust takes --app <bundle-id>
+nazar help trust: its flags and examples
+=== nazar ["trust" "--app" "com.googlecode.iterm2"]
+exit 0
+--- stdout
+pinned app com.googlecode.iterm2 to team TEAM (installed at /Applications/X.app)
+app: matchers for this bundle id now match that team
+--- stderr
+=== nazar ["trust" "--app" ""]
+exit 2
+--- stdout
+--- stderr
+nazar: trust: --app needs a bundle id
+nazar help trust: its flags and examples
+=== nazar ["trust" "a" "--app" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: trust: a path: rule needs no trust; trust takes --app <bundle-id>
+nazar help trust: its flags and examples
+=== nazar ["trust" "a" "b"]
+exit 2
+--- stdout
+--- stderr
+nazar: trust: a path: rule needs no trust; trust takes --app <bundle-id>
+nazar help trust: its flags and examples
+=== nazar ["trust" "-h"]
+exit 0
+--- stdout
+<help: nazar trust>
+--- stderr
+=== nazar ["log" "--since" "forever"]
+exit 2
+--- stdout
+--- stderr
+nazar: log: --since: invalid duration "forever"
+nazar help log: its flags and examples
+=== nazar ["log" "--since" "0s"]
+exit 2
+--- stdout
+--- stderr
+nazar: log: --since: duration "0s" must be positive
+nazar help log: its flags and examples
+=== nazar ["log" "extra"]
+exit 2
+--- stdout
+--- stderr
+nazar: log: expected 0 argument(s), got 1
+nazar help log: its flags and examples
+=== nazar ["log" "summary" "--follow"]
+exit 2
+--- stdout
+--- stderr
+nazar: log summary can't --follow
+nazar help log summary: its flags and examples
+=== nazar ["log" "-h"]
+exit 0
+--- stdout
+<help: nazar log>
+--- stderr
+=== nazar ["log" "summary" "-h"]
+exit 0
+--- stdout
+<help: nazar log summary>
+--- stderr
+=== nazar ["log" "--since" "1h" "--target" "github" "--caller" "iterm" "--decision" "blocked"]
+exit 0
+--- stdout
+--- stderr
+=== nazar ["log" "summary"]
+exit 0
+--- stdout
+TARGET  TOTAL  BLOCKED  CALLERS
+--- stderr
+=== nazar ["log" "sumary"]
+exit 2
+--- stdout
+--- stderr
+nazar: log: expected 0 argument(s), got 1
+nazar help log: its flags and examples
+=== nazar ["apps"]
+exit 2
+--- stdout
+--- stderr
+nazar: apps needs a subcommand: list
+nazar help apps: its flags and examples
+=== nazar ["apps" "lst"]
+exit 2
+--- stdout
+--- stderr
+nazar: apps needs a subcommand: list
+
+Did you mean this?
+	list
+
+nazar help apps: its flags and examples
+=== nazar ["apps" "list"]
+exit 0
+--- stdout
+NAME   MATCHER                    PINNED TEAM  USED BY
+iterm  app:com.googlecode.iterm2               github rule 1
+--- stderr
+=== nazar ["--json" "apps" "list"]
+exit 0
+--- stdout
+{"apiVersion":"nazar/v1","kind":"AppList","staged":false,"configHash":"","items":[{"name":"iterm","matcher":{"kind":"app","id":"com.googlecode.iterm2","ref":"iterm"},"usedBy":["github rule 1"]}]}
+--- stderr
+=== nazar ["apps" "-h"]
+exit 0
+--- stdout
+<help: nazar apps>
+--- stderr
+=== nazar ["apps" "list" "-h"]
+exit 0
+--- stdout
+<help: nazar apps list>
+--- stderr
+=== nazar ["apps" "list" "x"]
+exit 2
+--- stdout
+--- stderr
+nazar: apps list: expected 0 argument(s), got 1
+nazar help apps list: its flags and examples
+=== nazar ["ui"]
+exit 1
+--- stdout
+--- stderr
+nazar: ui: not available in this build
+=== nazar ["ui" "extra"]
+exit 2
+--- stdout
+--- stderr
+nazar: ui: expected 0 argument(s), got 1
+nazar help ui: its flags and examples
+=== nazar ["ui" "-h"]
+exit 0
+--- stdout
+<help: nazar ui>
+--- stderr
+=== nazar ["install" "--bin-dir" "rel"]
+exit 2
+--- stdout
+--- stderr
+nazar: install: --bin-dir must be an absolute path
+nazar help install: its flags and examples
+=== nazar ["install" "-h"]
+exit 0
+--- stdout
+<help: nazar install>
+--- stderr
+=== nazar ["install" "extra"]
+exit 2
+--- stdout
+--- stderr
+nazar: install: expected 0 argument(s), got 1
+nazar help install: its flags and examples
+=== nazar ["install" "--no-links" "--bin-dir" "/x"]
+exit 2
+--- stdout
+--- stderr
+nazar: install: --no-links and --bin-dir don't go together
+nazar help install: its flags and examples
+=== nazar ["uninstall" "--no-links"]
+exit 2
+--- stdout
+--- stderr
+nazar: uninstall: flag provided but not defined: -no-links
+nazar help uninstall: its flags and examples
+=== nazar ["uninstall" "-h"]
+exit 0
+--- stdout
+<help: nazar uninstall>
+--- stderr
+=== nazar ["uninstall" "--bin-dir" "rel"]
+exit 2
+--- stdout
+--- stderr
+nazar: uninstall: --bin-dir must be an absolute path
+nazar help uninstall: its flags and examples
+=== nazar ["sign-git" "-Y" "sign" "-n" "git" "-f" "/k.pub" "-h"]
+exit 1
+exec ["/usr/bin/ssh-keygen" "ssh-keygen" "-Y" "sign" "-n" "git" "-f" "/k.pub" "-h"]
+--- stdout
+--- stderr
+nazar: could not run /usr/bin/ssh-keygen: stub exec
+=== nazar ["sign-git" "--help"]
+exit 1
+exec ["/usr/bin/ssh-keygen" "ssh-keygen" "--help"]
+--- stdout
+--- stderr
+nazar: could not run /usr/bin/ssh-keygen: stub exec
+=== nazar ["sign-git" "--json" "-y"]
+exit 1
+exec ["/usr/bin/ssh-keygen" "ssh-keygen" "--json" "-y"]
+--- stdout
+--- stderr
+nazar: could not run /usr/bin/ssh-keygen: stub exec
+=== nazar ["ssh-key" "list"] (no nazar-agent)
+exit 5
+--- stdout
+--- stderr
+nazar: nazar-agent isn't running (cannot connect to $HOME/c.sock: dial unix $HOME/c.sock: connect: no such file or directory); run `nazar install`
+=== nazar ["--json" "status"] (no nazar-agent)
+exit 5
+--- stdout
+{"apiVersion":"nazar/v1","kind":"Problem","code":"unavailable","message":"nazar-agent isn't running (cannot connect to $HOME/c.sock: dial unix $HOME/c.sock: connect: no such file or directory); run `nazar install`"}
+--- stderr
+=== nazar ["get" "GH_TOKEN"] (no nazar-agent)
+exit 5
+--- stdout
+--- stderr
+nazar: nazar-agent isn't running (cannot connect to $HOME/c.sock: dial unix $HOME/c.sock: connect: no such file or directory); run `nazar install`
+=== nazar ["secret" "list"] (no nazar-agent)
+exit 5
+--- stdout
+--- stderr
+nazar: nazar-agent isn't running (cannot connect to $HOME/c.sock: dial unix $HOME/c.sock: connect: no such file or directory); run `nazar install`
+=== nazar ["k8s" "list"] (no nazar-agent)
+exit 5
+--- stdout
+--- stderr
+nazar: nazar-agent isn't running (cannot connect to $HOME/c.sock: dial unix $HOME/c.sock: connect: no such file or directory); run `nazar install`
+=== nazar ["aws" "list"] (no nazar-agent)
+exit 5
+--- stdout
+--- stderr
+nazar: nazar-agent isn't running (cannot connect to $HOME/c.sock: dial unix $HOME/c.sock: connect: no such file or directory); run `nazar install`
+=== git-credential-nazar ["get"] stdin="protocol=https\nhost=github.com\n\n"
+exit 3
+--- stdout
+--- stderr
+nazar: secret GH_TOKEN: no rule allows this caller
+=== git-credential-nazar ["get"] stdin="protocol=http\nhost=github.com\n\n"
+exit 3
+--- stdout
+--- stderr
+nazar: git-credential-nazar: only https is answered
+=== git-credential-nazar []
+exit 2
+--- stdout
+--- stderr
+nazar: git-credential-nazar: expected one action (get, store or erase), got 0 arguments
+nazar help sign-git: its flags and examples
+=== git-credential-nazar ["store"]
+exit 0
+--- stdout
+--- stderr
+=== git-credential-nazar ["get" "-h"]
+exit 2
+--- stdout
+--- stderr
+nazar: git-credential-nazar: expected one action (get, store or erase), got 2 arguments
+nazar help sign-git: its flags and examples
+=== git-credential-nazar ["--help"]
+exit 0
+--- stdout
+--- stderr
+=== nazar-sign-git ["-Y" "sign" "-n" "git" "--help"]
+exit 1
+exec ["/usr/bin/ssh-keygen" "ssh-keygen" "-Y" "sign" "-n" "git" "--help"]
+--- stdout
+--- stderr
+nazar: could not run /usr/bin/ssh-keygen: stub exec
+=== nazar-sign-git ["help"]
+exit 1
+exec ["/usr/bin/ssh-keygen" "ssh-keygen" "help"]
+--- stdout
+--- stderr
+nazar: could not run /usr/bin/ssh-keygen: stub exec

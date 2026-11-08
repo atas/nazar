@@ -1,0 +1,6 @@
+build/
+swift/.build/
+swift/.build-*/
+s678-agent/test-sshd/
+*.handle
+__pycache__/

@@ -1,0 +1,156 @@
+# Releases nazar: weekly when main has new commits, or by hand (Actions →
+# Release → Run workflow). It builds, signs (Developer ID), notarizes,
+# publishes the GitHub release and updates atas/homebrew-tap. The signing
+# secrets live in the `release` environment only. docs/RELEASING.md.
+name: Release
+
+on:
+    schedule:
+        - cron: "0 12 * * 6"
+    workflow_dispatch:
+        inputs:
+            version:
+                description: "Version (X.Y.Z); empty: the next patch"
+                required: false
+
+permissions:
+    contents: write
+
+concurrency:
+    group: release
+    cancel-in-progress: false
+
+jobs:
+    # Which version, if any: nothing when main has no commit since the last tag.
+    plan:
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        outputs:
+            version: ${{ steps.v.outputs.version }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+                  persist-credentials: false
+            - id: v
+              env:
+                  WANT: ${{ inputs.version }}
+              run: |
+                  set -euo pipefail
+                  last=$(git tag --list 'v[0-9]*.[0-9]*.[0-9]*' --sort=-v:refname | head -1)
+                  if [ -n "$last" ] && [ -z "$(git rev-list "$last..HEAD")" ]; then
+                      echo "no commits since $last: nothing to release"
+                      exit 0
+                  fi
+                  if [ -n "$WANT" ]; then
+                      v=$WANT
+                  else
+                      IFS=. read -r a b c <<<"${last#v}"
+                      v="$a.$b.$((c + 1))"
+                  fi
+                  [[ "$v" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "bad version: $v" >&2; exit 1; }
+                  ! git rev-parse -q --verify "refs/tags/v$v" >/dev/null || { echo "v$v exists" >&2; exit 1; }
+                  echo "releasing $v (after ${last:-nothing})"
+                  echo "version=$v" >> "$GITHUB_OUTPUT"
+
+    release:
+        needs: plan
+        if: needs.plan.outputs.version != ''
+        runs-on: ${{ vars.RELEASE_RUNNER || 'macos-26' }}
+        environment: release
+        timeout-minutes: 60
+        env:
+            V: ${{ needs.plan.outputs.version }}
+            NAZAR_SIGN_ID: ${{ vars.NAZAR_SIGN_ID }}
+            NAZAR_NOTARY_PROFILE: nazar-notary
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  fetch-depth: 0
+
+            - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+              with:
+                  go-version-file: go.mod
+
+            # The version goes into both bundles on a release commit that only
+            # the tag points to; main is not changed.
+            - name: Version and tag
+              run: |
+                  set -euo pipefail
+                  build=$(git rev-list --count HEAD)
+                  for p in macos/Resources/Agent/Info.plist macos/Resources/UI/Info.plist; do
+                      /usr/bin/plutil -replace CFBundleShortVersionString -string "$V" "$p"
+                      /usr/bin/plutil -replace CFBundleVersion -string "$build" "$p"
+                  done
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git commit -qam "nazar $V"
+                  git tag -a "v$V" -m "v$V"
+
+            # A throwaway keychain on the throwaway runner: the Developer ID
+            # identity and the notary profile, nothing else.
+            - name: Keychain
+              env:
+                  P12: ${{ secrets.DEVELOPER_ID_P12_BASE64 }}
+                  P12_PASSWORD: ${{ secrets.DEVELOPER_ID_P12_PASSWORD }}
+                  NOTARY_KEY: ${{ secrets.NOTARY_API_KEY }}
+                  NOTARY_KEY_ID: ${{ vars.NOTARY_KEY_ID }}
+                  NOTARY_ISSUER: ${{ vars.NOTARY_ISSUER_ID }}
+              run: |
+                  set -euo pipefail
+                  kc="$RUNNER_TEMP/release.keychain-db"
+                  kcpw=$(openssl rand -hex 24)
+                  security create-keychain -p "$kcpw" "$kc"
+                  security set-keychain-settings -lut 3600 "$kc"
+                  security unlock-keychain -p "$kcpw" "$kc"
+                  printf '%s' "$P12" | base64 --decode > "$RUNNER_TEMP/id.p12"
+                  security import "$RUNNER_TEMP/id.p12" -k "$kc" -P "$P12_PASSWORD" -T /usr/bin/codesign
+                  rm -f "$RUNNER_TEMP/id.p12"
+                  security set-key-partition-list -S apple-tool:,apple: -s -k "$kcpw" "$kc" > /dev/null
+                  security list-keychains -d user -s "$kc"
+                  security default-keychain -d user -s "$kc"
+                  printf '%s' "$NOTARY_KEY" > "$RUNNER_TEMP/notary.p8"
+                  xcrun notarytool store-credentials "$NAZAR_NOTARY_PROFILE" --key "$RUNNER_TEMP/notary.p8" \
+                      --key-id "$NOTARY_KEY_ID" --issuer "$NOTARY_ISSUER" --keychain "$kc"
+                  rm -f "$RUNNER_TEMP/notary.p8"
+                  security find-identity -v -p codesigning "$kc"
+
+            - name: Build, sign, notarize
+              run: make release
+
+            - name: Publish
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  git push origin "v$V"
+                  gh release create "v$V" --verify-tag --title "v$V" --generate-notes \
+                      "build/release/nazar-$V.zip" "build/release/nazar-ui-$V.zip"
+                  for z in "nazar-$V.zip" "nazar-ui-$V.zip"; do
+                      got=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/$z" | shasum -a 256 | cut -d' ' -f1)
+                      want=$(shasum -a 256 "build/release/$z" | cut -d' ' -f1)
+                      [ "$got" = "$want" ] || { echo "$z: downloaded $got, built $want" >&2; exit 1; }
+                  done
+
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  repository: atas/homebrew-tap
+                  path: tap
+                  ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
+
+            - name: Update the tap
+              run: |
+                  set -euo pipefail
+                  mkdir -p tap/Casks
+                  make release-tap TAP=tap
+                  cd tap
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add Casks
+                  git commit -m "nazar $V"
+                  git push
+
+            - name: Remove the keychain
+              if: always()
+              run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true

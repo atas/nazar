@@ -1,0 +1,81 @@
+package certs // github.com/atas/nazar/core/certs
+
+type CA struct {
+	Name      string
+	Handle    []byte
+	PublicKey []byte // X9.63 uncompressed point
+	Created   time.Time
+	Cert      *x509.Certificate
+	Access    platform.Access
+	// contains filtered or unexported fields
+}
+
+func (ca *CA) CertPEM() []byte
+
+func (ca *CA) Info() CAInfo
+
+func (ca *CA) Issue(p platform.Platform, spec LeafSpec, now time.Time, ref platform.ApprovalRef) (Leaf, error)
+
+type CAInfo struct {
+	Name        string
+	Created     time.Time
+	Fingerprint string // SHA-256 of the certificate's DER, hex
+	NotAfter    time.Time
+	Access      platform.Access
+	Broken      bool
+	Unreadable  bool
+	Problem     string
+}
+
+type Kind struct {
+	// contains filtered or unexported fields
+}
+
+func NewKind(tag, prefix, noun, subject string, valid func(string) bool) *Kind
+
+func (k *Kind) ErrBroken() error
+
+func (k *Kind) ErrExists() error
+
+func (k *Kind) ErrInvalidName() error
+
+func (k *Kind) ErrNotFound() error
+
+func (k *Kind) ErrUnreadable() error
+
+type Leaf struct {
+	Cert *x509.Certificate
+	Key  *ecdsa.PrivateKey
+}
+
+type LeafSpec struct {
+	CN        string
+	O         []string  // one O= each; empty for AWS
+	NotBefore time.Time // the caller's; cut to whole seconds
+	NotAfter  time.Time // the caller's; cut to whole seconds and to the CA's end
+	Serial    Serial    // zero: a new random one
+}
+
+type Serial struct {
+	// contains filtered or unexported fields
+}
+
+func NewSerial() (Serial, error)
+
+func (s Serial) Decimal() string
+
+func (s Serial) Hex() string
+
+type Store struct {
+	// contains filtered or unexported fields
+}
+
+func NewStore(k *Kind, p platform.Platform, v platform.Vault, now func() time.Time) *Store
+
+func (s *Store) Create(name string, access platform.Access) (ca *CA, err error)
+
+func (s *Store) Delete(name string) error
+
+func (s *Store) Get(name string) (*CA, error)
+
+func (s *Store) List() ([]CAInfo, error)

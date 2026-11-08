@@ -1,0 +1,17 @@
+# Actions are pinned to commit SHAs; Dependabot bumps the SHA and its version comment.
+version: 2
+updates:
+    - package-ecosystem: github-actions
+      directory: /
+      schedule:
+          interval: weekly
+      groups:
+          actions:
+              patterns: ["*"]
+    - package-ecosystem: gomod
+      directory: /
+      schedule:
+          interval: weekly
+      groups:
+          go:
+              patterns: ["*"]

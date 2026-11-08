@@ -1,0 +1,1 @@
+{"apiVersion":"nazar/v1","ca":null,"caBroken":false,"configured":false,"kind":"K8sContext","name":"hydra","rules":[],"state":"absent","warnings":[]}

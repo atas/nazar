@@ -1,0 +1,1 @@
+{"apiVersion":"nazar/v1","applied":true,"changed":true,"hash":"HASH","key":"github","kind":"ConfigEdit","op":"rule.remove","path":"/Users/u/.nazar/config/config.yaml","problems":[]}

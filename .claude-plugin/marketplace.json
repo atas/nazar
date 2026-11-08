@@ -1,0 +1,14 @@
+{
+  "name": "nazar",
+  "description": "nazar: the skill that tells Claude Code how to set up and use nazar, the Secure Enclave SSH agent and secrets broker for macOS",
+  "owner": {
+    "name": "nazar"
+  },
+  "plugins": [
+    {
+      "name": "nazar",
+      "source": "./",
+      "description": "How to set nazar up and use it: SSH keys, git signing, secrets for scripts and MCP servers, kubectl, and what an agent must never do to get around a refusal"
+    }
+  ]
+}

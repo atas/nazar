@@ -1,0 +1,120 @@
+name: Go
+
+on:
+    pull_request:
+    push:
+        branches: [main]
+
+# Cancel superseded PR runs only; every merge commit on main keeps its own result.
+concurrency:
+    group: go-${{ github.ref }}
+    cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+    contents: read
+
+jobs:
+    go:
+        runs-on: ubuntu-latest
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  # Nothing here pushes; keep GITHUB_TOKEN out of .git/config while tests run.
+                  persist-credentials: false
+
+            - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+              with:
+                  go-version-file: go.mod
+                  cache: true
+                  cache-dependency-path: go.sum
+
+            # Two unit tests need OpenSSH's ssh-keygen:
+            # - cmd/nazar TestSignGitBinaryReachesNazarAgent execs /usr/bin/ssh-keygen at that exact
+            #   path (nazar sign-git execs /usr/bin/ssh-keygen on purpose, cmd/nazar/signgit.go) and
+            #   t.Fatalf's without it, so a PATH lookup is not enough;
+            # - core/ssh/knownhosts TestOpenSSHHashInterop merely skips without one.
+            # So a missing /usr/bin/ssh-keygen fails the job here instead of as an unclear test
+            # failure later. A runner may lack both openssh-client and passwordless sudo.
+            - name: Require /usr/bin/ssh-keygen
+              run: |
+                  if [ -x /usr/bin/ssh-keygen ]; then
+                      ssh -V 2>&1 || true   # ssh-keygen has no version flag; ssh prints OpenSSH's on stderr
+                      exit 0
+                  fi
+                  if [ "$RUNNER_OS" = Linux ] && sudo -n true 2>/dev/null; then
+                      sudo -n apt-get update -qq
+                      sudo -n apt-get install -y -qq --no-install-recommends openssh-client
+                  fi
+                  if [ ! -x /usr/bin/ssh-keygen ]; then
+                      echo "::error::/usr/bin/ssh-keygen is missing and could not be installed (no passwordless sudo?). cmd/nazar TestSignGitBinaryReachesNazarAgent fails without it; add openssh-client to the runner image."
+                      exit 1
+                  fi
+
+            # On Linux -race needs cgo and a C compiler (darwin's race detector has not used cgo
+            # since Go 1.20, so the macOS job below skips this).
+            - name: Check C toolchain for -race (Linux)
+              if: runner.os == 'Linux'
+              run: |
+                  command -v cc >/dev/null || { echo "::error::-race needs a C compiler (cc) on the runner."; exit 1; }
+                  [ "$(go env CGO_ENABLED)" = 1 ] || { echo "::error::-race needs CGO_ENABLED=1, got '$(go env CGO_ENABLED)'."; exit 1; }
+
+            # The Makefile is the single definition of what "passing" means; CI only calls it. `make test` = go vet, vet -tags integration,
+            # gofmt on core/cmd/internal/test, then go test -race -count=1 on core/cmd/internal.
+            # cmd/nazar's tests also `go build` the binary. On a runner short of memory, pass
+            # `GOFLAGS=-p=1` here.
+            - name: make test
+              run: make test
+
+            # The shipping platform is macOS (spec section 2 has no Linux build), yet this job is
+            # Linux, so core/unixsock/peer_darwin.go (LOCAL_PEERCRED, the kernel-verified peer UID
+            # check) would otherwise never be compiled or vetted in CI. Cross-vet both OSes.
+            - name: make vet-cross
+              run: make vet-cross
+
+            # Short fuzz runs (an execution count each, see the Makefile for why not a duration)
+            # of the parsers that read untrusted bytes: config YAML, audit lines, the agent wire
+            # protocol. Seeds alone run under `make test`.
+            - name: make fuzz
+              run: make fuzz
+
+            - name: Integration tests not run here
+              if: runner.os != 'macOS'
+              run: echo "::notice title=Integration tests not run::test/integration needs macOS (Apple-signed /usr/bin/ssh, /usr/sbin/sshd). Run 'make integration' on a Mac, or set the repo variable CI_INTEGRATION_RUNNER (see the integration job)."
+
+    # The integration tests drive Apple's /usr/bin/ssh, /usr/sbin/sshd, ssh-add, ssh-keygen and
+    # git against nazar-testd, and several cases pin the Apple code signature of ssh
+    # (signed: {team: apple, id: com.apple.openssh}). Their TestMain exits 0 on anything but
+    # darwin, so on Linux they would "pass" without running a single test.
+    #
+    # They were proven only on macOS 27 with OpenSSH 10.3 and git 2.55. Whether
+    # GitHub's macos-latest image (its OpenSSH, /usr/sbin/sshd and signature) passes is
+    # UNVERIFIED. To try it, set the repo variable CI_INTEGRATION_RUNNER=macos-latest or the
+    # label of a self-hosted Mac. Unset (the default),
+    # this job is skipped.
+    #
+    # SECURITY: fork PRs are skipped, so fork code never reaches a self-hosted Mac named by
+    # CI_INTEGRATION_RUNNER.
+    integration:
+        name: Integration tests (macOS)
+        if: vars.CI_INTEGRATION_RUNNER != '' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        runs-on: ${{ vars.CI_INTEGRATION_RUNNER || 'macos-latest' }}
+        timeout-minutes: 30
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+
+            - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+              with:
+                  go-version-file: go.mod
+                  cache: true
+                  cache-dependency-path: go.sum
+
+            - name: Require macOS
+              run: |
+                  [ "$RUNNER_OS" = macOS ] || { echo "::error::CI_INTEGRATION_RUNNER must name a macOS runner; TestMain exits 0 elsewhere and the tests would pass vacuously."; exit 1; }
+                  sw_vers; /usr/bin/ssh -V; git --version
+
+            - name: make integration
+              run: make integration

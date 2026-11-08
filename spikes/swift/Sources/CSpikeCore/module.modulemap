@@ -1,0 +1,5 @@
+module CSpikeCore [system] {
+    header "../../../build/libspikecore.h"
+    link "spikecore"
+    export *
+}

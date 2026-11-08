@@ -1,0 +1,1 @@
+{"apiVersion":"nazar/v1","code":"unavailable","kind":"Problem","message":"nazar-agent isn't running (cannot connect to /Users/u/c.sock: dial unix /Users/u/c.sock: connect: no such file or directory); run `nazar install`"}

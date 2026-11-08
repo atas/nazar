@@ -1,0 +1,11 @@
+{
+  "name": "nazar",
+  "description": "How to set nazar up and use it: SSH keys, git signing, secrets for scripts and MCP servers, kubectl, and what an agent must never do to get around a refusal",
+  "author": {
+    "name": "nazar"
+  },
+  "homepage": "https://github.com/atas/nazar",
+  "repository": "https://github.com/atas/nazar",
+  "license": "Apache-2.0",
+  "keywords": ["ssh", "secure-enclave", "secrets", "git-signing", "kubectl", "macos"]
+}

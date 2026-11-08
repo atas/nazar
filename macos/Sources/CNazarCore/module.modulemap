@@ -1,0 +1,5 @@
+module CNazarCore [system] {
+    header "../../../build/libnazar-core.h"
+    link "nazar-core"
+    export *
+}

@@ -1,0 +1,1 @@
+{"name": "s12-cjs", "version": "1.0.0", "bin": {"s12-cjs": "bin.js"}, "dependencies": {"s12-post": "file:../node-post"}}

@@ -1,0 +1,1 @@
+{"name": "s12-post", "version": "1.0.0", "scripts": {"postinstall": "node post.js"}}

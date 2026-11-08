@@ -1,0 +1,56 @@
+# nazar: the Secure Enclave SSH agent and its CLI (spec 12). Rendered by
+# `scripts/release.sh casks` from packaging/homebrew/nazar.rb.in in the
+# nazar repository; edit the template, not the rendered cask.
+cask "nazar" do
+  version "@VERSION@"
+  sha256 "@AGENT_SHA256@"
+
+  url "https://github.com/atas/nazar/releases/download/v#{version}/nazar-#{version}.zip"
+  name "nazar"
+  desc "SSH agent with Secure Enclave keys and per-key caller rules"
+  homepage "https://github.com/atas/nazar"
+
+  depends_on arch: :arm64
+  depends_on macos: :tahoe
+
+  # nazar-agent.app is the background service, not an app you open: it
+  # stays in the Caskroom, and `nazar install` registers it wherever it is.
+  # Its keys belong to its signature, not its path, so an upgrade keeps them.
+  binary "nazar-agent.app/Contents/MacOS/nazar"
+  binary "nazar-agent.app/Contents/MacOS/nazar", target: "nazar-sign-git"
+  binary "nazar-agent.app/Contents/MacOS/nazar", target: "git-credential-nazar"
+
+  # Flight blocks, not the *_steps brew style asks for: Homebrew runs
+  # *_steps in its cask sandbox, where HOME is a temporary folder and
+  # mach-lookup is denied, so `nazar install` could neither find
+  # ~/Library/LaunchAgents nor talk to launchd. Homebrew deprecates these
+  # blocks (a warning on install; an error with HOMEBREW_DEVELOPER set)
+  # but still accepts them from third-party taps.
+
+  # The LaunchAgent dev.nazar.agent and ~/.nazar; the links are the binary
+  # stanzas above. Also removes an old Nazar.app install (dev.nazar).
+  postflight do
+    system_command "#{staged_path}/nazar-agent.app/Contents/MacOS/nazar",
+                   args:         ["install", "--no-links"],
+                   print_stdout: true
+  end
+
+  # Stops the agent and removes its LaunchAgent. Keys, config and Keychain
+  # items are kept. On an upgrade this runs before the new version's
+  # postflight installs it again.
+  uninstall_preflight do
+    system_command "#{staged_path}/nazar-agent.app/Contents/MacOS/nazar",
+                   args:         ["uninstall"],
+                   print_stdout: true
+  end
+
+  caveats <<~EOS
+    nazar keeps your keys, config (~/.nazar) and Keychain items when it is
+    uninstalled or upgraded.
+
+    Point ssh at the agent (~/.ssh/config):
+      IdentityAgent ~/.nazar/run/agent.sock
+
+    The optional window: brew install --cask atas/tap/nazar-ui
+  EOS
+end
