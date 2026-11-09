@@ -730,7 +730,7 @@ its subsections say otherwise, this paragraph wins until the deferred parts are 
   (`match.RunIdentity`: realpath, a digest of the resolution and of the stable environment, the
   argv tail), so changed bytes, another argument or another `envAllow` value ask again. No pin is
   recorded in the Vault, no `config reload`, no two-phase `config apply`. `gate: none` on a secret
-  whose `deliver` has `late-env` needs `to:` to name the exact command line (refused otherwise), and warns when that command is a launcher: files are still pinned and checked per request, only the prompt goes (owner decision: the dialog showed the same text either way). A pinned file or folder on a volume a process of
+  whose `deliver` has `late-env` covers any child of the app the rule names, and warns when `to:` names a launcher: files are still pinned and checked per request, only the prompt goes (owner decision: the dialog showed the same text either way). A pinned file or folder on a volume a process of
   the user mounted (statfs `f_owner` not root: a disk image, a share, a file-system extension)
   is refused, at every pin and re-pin (D12).
 - **Folder (6.3.7, D6):** always `/`; `cwd:` is refused by name; a relative file element in a

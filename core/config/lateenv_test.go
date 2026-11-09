@@ -131,18 +131,17 @@ func TestCommandReceiversNeedLateEnv(t *testing.T) {
 	wantError(t, rulesHdr+"        - apps: [iterm]\n          to: [{command: [printenv]}]\n          gate: login\n", "not to ssh keys")
 }
 
-// A silent rule on a late-env secret must name the exact command line: without
-// that, gate: none would hand the value to any node or python3 program its
-// callers run. Files are still pinned and checked per request either way.
-func TestLateEnvGateNoneNeedsACommandReceiver(t *testing.T) {
-	for _, body := range []string{
-		"  X:\n    deliver: [late-env]\n    rules:\n      - apps: [claude]\n        gate: none\n",
-		"  X:\n    deliver: [helper, late-env]\n    rules:\n      - apps: [claude]\n        to: [{signed: {team: apple, id: com.apple.git-remote-http}}]\n        gate: none\n",
-	} {
-		wantError(t, lateHdr("")+body, "gate: none on a late-env secret needs to: [{command: [...]}]")
+// A silent rule on a late-env secret needs no to:: naming an app covers any
+// child of it. Files are still pinned and checked per request. A matcher for
+// every caller stays refused.
+func TestLateEnvGateNoneForAnApp(t *testing.T) {
+	c, probs := mustParse(t, lateHdr("")+"  X:\n    deliver: [late-env]\n    rules:\n      - apps: [claude]\n        gate: none\n")
+	if probs.HasErrors() || c.Secrets["X"].Rules[0].Policy.Gate != GateNone {
+		t.Fatalf("a silent late-env rule for an app is valid: %v", probs)
 	}
+	wantError(t, lateHdr("")+"  X:\n    deliver: [late-env]\n    rules:\n      - apps: [any]\n        gate: none\n", "rule 1 would give this secret")
 	silent := strings.Replace(braveEntry, "        scope: session\n        gate: dialog\n", "        gate: none\n", 1)
-	c, probs := mustParse(t, lateHdr("")+silent)
+	c, probs = mustParse(t, lateHdr("")+silent)
 	if probs.HasErrors() {
 		t.Fatal(probs)
 	}

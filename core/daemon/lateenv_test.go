@@ -531,3 +531,24 @@ func TestRunNeedsLateEnvInDeliver(t *testing.T) {
 		t.Fatalf("problem %+v", p)
 	}
 }
+
+// nazar run under a rule naming an app with gate: none and no to: starts any
+// interpreter command its children ask for, with no prompt. Files are still
+// pinned in the plan.
+func TestRunSilentForAChildOfTheNamedApp(t *testing.T) {
+	r := startRun(t, nil)
+	r.ready(t, "      - apps: [iterm]\n        gate: none\n")
+	r.f.SetDefaults(fake.Answer{}, fake.Answer{}) // a prompt would be refused
+	logins, dialogs := r.f.CountShown(fake.KindAuthenticate), r.f.CountShown(fake.KindConfirm)
+	r.asCLI(cliProc("run", "--secret", "API_KEY", "--", "node", r.srv))
+	plan, p := r.run(t, []string{"node", r.srv}, nil, nil)
+	if p != nil {
+		t.Fatal(p)
+	}
+	if plan.ExecPath != r.node || len(plan.Files) != 2 || plan.Files[1].Path != r.srv {
+		t.Fatalf("plan %+v", plan)
+	}
+	if r.f.CountShown(fake.KindAuthenticate) != logins || r.f.CountShown(fake.KindConfirm) != dialogs {
+		t.Fatal("no prompt under gate: none")
+	}
+}

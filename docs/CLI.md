@@ -270,8 +270,7 @@ environment it builds itself (`PATH` from `trustedPath`, your home, user, temp f
 `LC_*`, `TERM`), and passes on another variable of yours only when the secret's `envAllow:` lists
 it (`envAllow: [HTTPS_PROXY]`; variables that load code, such as `NODE_OPTIONS` or `DYLD_*`,
 never). One `--secret` per run; `node`, `python3` and `npx` only (not Apple's, Xcode's or Homebrew's
-`python3`, which start themselves again), and not from a disk image or share you mounted; `gate: none` needs `to:` naming the exact command
-line (it runs with no prompt, and `npx` picks what it runs from files you can edit). Refused at the prompt or before it: `nazar run` exits 3 and nothing runs.
+`python3`, which start themselves again), and not from a disk image or share you mounted; under `gate: none` it runs with no prompt for any child of the app the rule names (and `npx` picks what it runs from files you can edit). Refused at the prompt or before it: `nazar run` exits 3 and nothing runs.
 Refused after the exec (a pinned file or a variable changed, or a volume was mounted or unmounted
 during the run): the program runs without the value
 and prints `nazar: secret NAME not delivered: <why>`; `nazar log --target secret:NAME` has the

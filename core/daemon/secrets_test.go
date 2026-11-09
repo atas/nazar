@@ -571,3 +571,36 @@ func TestVaultHealthCoversSecrets(t *testing.T) {
 		}
 	}
 }
+
+// A rule naming an app gives the value to any child of it with no prompt and
+// no to:; a program outside the app gets nothing, and no prompt either.
+func TestSecretGetSilentForAChildOfTheNamedApp(t *testing.T) {
+	e := startSecrets(t)
+	e.approved(t, strings.Replace(strings.Replace(getConfig, "        to: [{signed: {team: apple, id: com.apple.bash}}]\n", "", 1), "        scope: session\n        gate: dialog\n", "        gate: none\n", 1))
+	e.asCLI(cliProc("secret", "add", "NOTES"))
+	if _, p := e.addSecret(t, "NOTES", testValue); p != nil {
+		t.Fatal(p)
+	}
+	e.f.SetDefaults(fake.Answer{}, fake.Answer{}) // a prompt would be refused
+	logins, dialogs := e.f.CountShown(fake.KindAuthenticate), e.f.CountShown(fake.KindConfirm)
+	get := func() (control.SecretValue, *control.Problem) {
+		var v control.SecretValue
+		err := e.call(t, control.CmdSecretGet, map[string]string{"name": "NOTES"}, control.KindSecretValue, &v)
+		return v, control.AsProblem(err)
+	}
+
+	e.asCLI(scriptProc("deploy.sh"), cliProc("get", "NOTES"))
+	if v, p := get(); p != nil || v.ValueBase64 != b64(testValue) {
+		t.Fatalf("a child of the named app: %v (%d bytes)", p, len(v.ValueBase64))
+	}
+
+	other := e.f.Launch(platform.ProcessRef{}, fake.Proc{Path: "/Applications/Other.app/Contents/MacOS/Other", Code: platform.CodeIdentity{Signed: true, TeamID: "OTHERTEAM0", SigningID: "com.example.other"}, App: &fake.App{BundleID: "com.example.other", Name: "Other"}})
+	e.f.SetDefaultPeer(e.f.Launch(other, cliProc("get", "NOTES")))
+	if v, p := get(); p.ExitCode() != control.ExitRefused || v.ValueBase64 != "" {
+		t.Fatalf("a program outside the app: %+v (%d bytes)", p, len(v.ValueBase64))
+	}
+
+	if e.f.CountShown(fake.KindAuthenticate) != logins || e.f.CountShown(fake.KindConfirm) != dialogs {
+		t.Fatal("neither request may show a prompt")
+	}
+}
