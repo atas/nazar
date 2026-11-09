@@ -193,12 +193,13 @@ signed Node, Claude Code): a `gate: none` rule on such a `signed:` matcher silen
 script it runs, and nazar can't tell. That is left to you; see 5.12.
 
 A secret's value leaves nazar, so its rules are stricter (Milestone 8): `apps: [any]` or `unknown`
-under `gate: none` is refused, not warned about, and `gate: none` is refused altogether while
-`stdout` is one of the secret's delivery methods (it is in the default list), because a value
-printed without a prompt goes wherever the script sends it. A silent secret rule is possible only
-for a secret whose `deliver:` leaves out `stdout`, with an `app:` or third-party `signed:`
-matcher; on a `late-env` secret it must also name the exact command line in `to:`. Accepted
-risk there: `npx` picks what it runs from the registry and from files the user can edit, so a
+under `gate: none` is refused, not warned about. A silent secret rule names an `app:` or third-party
+`signed:` matcher, and it covers every child of that app, with any delivery method and with or
+without `to:`. nazar can't tell one child from another: under a silent rule for Claude Code, its
+Bash tool and any script that runs (an npm install script, say) get the value with no prompt, and
+a value on stdout goes wherever that program sends it. Programs outside the app stay refused, and
+adding the rule asks for approval like any other loosening. Accepted
+risk for `nazar run`: `npx` picks what it runs from the registry and from files the user can edit, so a
 compromised package version gets the key with no dialog. The dialog gave little against that
 anyway: it showed the same command line for the bad version as for a good one.
 

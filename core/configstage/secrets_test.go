@@ -110,17 +110,21 @@ func TestPlantedSecretRuleIsStagedNotApproved(t *testing.T) {
 	if after, err := v.Get(ApprovedVaultItem); err != nil || string(after) != string(before) {
 		t.Fatalf("the vault must still hold the approved config: %v", err)
 	}
-	// With the default deliver (stdout included) it is not a valid file.
-	r = s.Observe(src(base + strings.Replace(planted, "    deliver: [helper]\n", "", 1)))
-	if !r.Invalid || r.Staged || r.Applied || !strings.Contains(r.Problems.Error(), "deliver has stdout") || s.Active().Hash != h {
-		t.Fatalf("silent stdout must be invalid: %+v", r)
+	// With the default deliver (stdout included), or late-env, it is staged
+	// the same way: nothing is delivered until the user approves it.
+	for _, silent := range []string{
+		strings.Replace(planted, "    deliver: [helper]\n", "", 1),
+		strings.Replace(planted, "[helper]", "[late-env]", 1),
+	} {
+		r = s.Observe(src(base + silent))
+		if !r.Staged || r.Applied || r.Invalid || !strings.Contains(findingsText(r.Diff), "gate=none") || s.Active().Hash != h {
+			t.Fatalf("a planted silent rule must be staged and shown: %+v", r)
+		}
 	}
-	// A method a later version builds can't be planted now; late-env (built
-	// since M10) refuses a silent rule, and envAllow never names a
-	// variable that loads code.
+	// A method a later version builds can't be planted now, and envAllow
+	// never names a variable that loads code.
 	for later, why := range map[string]string{
-		strings.Replace(planted, "[helper]", "[env]", 1):                                                                          "not in this version",
-		strings.Replace(planted, "[helper]", "[late-env]", 1):                                                                     "gate: none on a late-env secret needs to: [{command: [...]}]",
+		strings.Replace(planted, "[helper]", "[env]", 1): "not in this version",
 		strings.Replace(planted, "    deliver: [helper]\n", "    deliver: [helper, late-env]\n    envAllow: [NODE_OPTIONS]\n", 1): "NODE_OPTIONS can never be passed",
 	} {
 		if r := s.Observe(src(base + later)); !r.Invalid || !strings.Contains(r.Problems.Error(), why) || s.Active().Hash != h {

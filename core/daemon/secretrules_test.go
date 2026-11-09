@@ -156,7 +156,7 @@ func TestSecretRuleEditRefusals(t *testing.T) {
 		{"neither", map[string]string{"op": control.EditRuleRemove, "index": "1"}, control.ExitUsage, "not both or neither"},
 		{"bad name", map[string]string{"op": control.EditRuleRemove, "secret": "../x", "index": "1"}, control.ExitUsage, "invalid secret name"},
 		{"own gate", map[string]string{"op": control.EditKeySet, "secret": "GH_TOKEN", "gate": "login"}, control.ExitUsage, "SSH keys"},
-		{"none with stdout", map[string]string{"op": control.EditRuleAdd, "secret": "GH_TOKEN", "apps": refs("iterm"), "gate": "none"}, control.ExitError, "would be invalid"},
+		{"none for any caller", map[string]string{"op": control.EditRuleAdd, "secret": "GH_TOKEN", "apps": refs("any"), "gate": "none"}, control.ExitError, "would be invalid"},
 		{"no such rule", map[string]string{"op": control.EditRuleRemove, "secret": "GH_TOKEN", "index": "9"}, control.ExitError, "secrets.GH_TOKEN"},
 		{"stale hash", map[string]string{"op": control.EditRuleRemove, "secret": "GH_TOKEN", "index": "1", "ifHash": "0000"}, control.ExitError, "nazar secret list"},
 	}
@@ -169,8 +169,8 @@ func TestSecretRuleEditRefusals(t *testing.T) {
 			t.Fatalf("%s changed config.yaml", c.name)
 		}
 	}
-	_, p := e.edit(t, map[string]string{"op": control.EditRuleAdd, "secret": "GH_TOKEN", "apps": refs("iterm"), "gate": "none"})
-	if !strings.Contains(strings.Join(p.Details, "\n"), "gate: none") {
+	_, p := e.edit(t, map[string]string{"op": control.EditRuleAdd, "secret": "GH_TOKEN", "apps": refs("any"), "gate": "none"})
+	if !strings.Contains(strings.Join(p.Details, "\n"), "without asking") {
 		t.Fatalf("the parse error must be in the details: %+v", p)
 	}
 }

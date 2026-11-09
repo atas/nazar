@@ -750,7 +750,7 @@ func (p *parser) entry(f map[string]*yaml.Node, n *yaml.Node, path string, c *Co
 				} else if kind == entryAWS {
 					p.errorf(f["gate"], join(path, "gate"), "an aws entry's own gate applies to every caller, so it can't be none; use a rule with an apps: matcher")
 				} else if kind == entrySecret {
-					p.errorf(f["gate"], join(path, "gate"), "a secret's own gate applies to every caller, so it can't be none; use a rule with an apps: matcher (and deliver: without stdout)")
+					p.errorf(f["gate"], join(path, "gate"), "a secret's own gate applies to every caller, so it can't be none; use a rule with an apps: matcher")
 				} else {
 					p.errorf(f["gate"], join(path, "gate"), "a key's own gate applies to every caller, so it can't be none; use a rule with an apps: matcher")
 				}
@@ -887,8 +887,8 @@ func validPort(host string) bool {
 var laterFields = []string{"file"}
 
 // secret parses one secrets entry. A bare "NAME:" has the default deliver,
-// no rules and no own policy. gate: none is refused in a rule while stdout
-// is a method: a value is never printed without a prompt.
+// no rules and no own policy. A rule may be gate: none with any method when it
+// names an app, which then covers any child of it; rule() refuses any and unknown.
 func (p *parser) secret(name string, n *yaml.Node, path string, c *Config) *Secret {
 	s := &Secret{Name: name, Deliver: DefaultDeliver()}
 	if n.Kind == yaml.ScalarNode && n.Tag == "!!null" {
@@ -940,24 +940,13 @@ func (p *parser) secret(name string, n *yaml.Node, path string, c *Config) *Secr
 			}
 		}
 	}
-	if slices.Contains(s.Deliver, DeliverStdout) {
-		for _, r := range s.Rules {
-			if r.Policy.Gate == GateNone {
-				p.errorf(f["rules"].Content[r.Index-1], fmt.Sprintf("%s.rules[%d].gate", path, r.Index),
-					"gate: none would hand %s to a script without a prompt (deliver has stdout); list deliver: without stdout", name)
-			}
-		}
-	}
 	return s
 }
 
 // runRules checks a secret's rules against nazar run (secrets design 6.3,
 // D4, D5): a command: receiver only ever matches a nazar run receiver, so
-// it needs late-env; a gate: none rule on a late-env secret must name the
-// exact command line in to:, or any node or python3 program its callers run
-// would get the value without a prompt; and a launcher receiver (by the typed
-// name) that won't ask again, under gate: none or scope: app, is warned about
-// (secrets design 4).
+// it needs late-env; and a launcher receiver (by the typed name) that won't
+// ask again, under gate: none or scope: app, is warned about (secrets design 4).
 func (p *parser) runRules(f map[string]*yaml.Node, path string, s *Secret, lateEnv bool) {
 	for _, r := range s.Rules {
 		rpath := fmt.Sprintf("%s.rules[%d]", path, r.Index)
@@ -974,16 +963,8 @@ func (p *parser) runRules(f map[string]*yaml.Node, path string, s *Secret, lateE
 				launcher = &r.To[i]
 			}
 		}
-		if lateEnv && r.Policy.Gate == GateNone {
-			named := len(r.To) > 0
-			for _, m := range r.To {
-				named = named && m.Kind == MatchCommand
-			}
-			if !named {
-				p.errorf(rn, rpath+".gate", "gate: none on a late-env secret needs to: [{command: [...]}], so that only that command line gets it without asking; use dialog or login otherwise")
-			} else if launcher != nil {
-				p.warnf(rn, rpath+".gate", "%s is a launcher; what it runs is chosen by files under your home directory (~/.npmrc) that any process of yours can edit, and this rule delivers %s to it without asking", launcher.Label(), s.Name)
-			}
+		if launcher != nil && r.Policy.Gate == GateNone {
+			p.warnf(rn, rpath+".gate", "%s is a launcher; what it runs is chosen by files under your home directory (~/.npmrc) that any process of yours can edit, and this rule delivers %s to it without asking", launcher.Label(), s.Name)
 		}
 		if launcher != nil && r.Policy.Gate.Prompts() && r.Policy.Scope == ScopeApp {
 			p.warnf(rn, rpath+".scope", "%s is a launcher; what it runs is chosen by files under your home directory (~/.npmrc) that any process of yours can edit, and this rule would deliver %s to it without asking again until the app quits; use scope: session or use", launcher.Label(), s.Name)

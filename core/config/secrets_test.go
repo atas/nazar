@@ -137,10 +137,20 @@ func TestSecretRuleChecks(t *testing.T) {
 	for _, m := range []string{"any", "unknown"} {
 		wantError(t, secretsHdr+"  X:\n    deliver: [helper]\n    rules:\n      - apps: ["+m+"]\n        to: [git-https]\n        gate: none\n", "rule 1 would give this secret to")
 	}
-	// ...and gate: none is refused while stdout is a method, whether
-	// deliver: lists it or the default does.
-	wantError(t, secretsHdr+"  X:\n    rules:\n      - apps: [iterm]\n        to: [git-https]\n        gate: none\n", "deliver has stdout")
-	wantError(t, secretsHdr+"  X:\n    deliver: [stdout]\n    rules:\n      - apps: [iterm]\n        to: [git-https]\n        gate: none\n", "deliver has stdout")
+	// ...also with stdout as a method, whether deliver: lists it or the
+	// default does...
+	for _, m := range []string{"any", "unknown"} {
+		wantError(t, secretsHdr+"  X:\n    rules:\n      - apps: ["+m+"]\n        gate: none\n", "rule 1 would give this secret")
+		wantError(t, secretsHdr+"  X:\n    deliver: [stdout]\n    rules:\n      - apps: ["+m+"]\n        gate: none\n", "rule 1 would give this secret")
+	}
+	// ...while a rule naming an app may be silent for any child of it, with
+	// stdout and with no to:.
+	for _, deliver := range []string{"", "    deliver: [stdout]\n"} {
+		c, probs := mustParse(t, secretsHdr+"  X:\n"+deliver+"    rules:\n      - apps: [iterm]\n        gate: none\n")
+		if probs.HasErrors() || c.Secrets["X"].Rules[0].Policy.Gate != GateNone {
+			t.Fatalf("a silent stdout rule for an app: matcher is valid (deliver %q): %v", deliver, probs)
+		}
+	}
 	// helper alone may be silent for an app: matcher.
 	c, probs := mustParse(t, secretsHdr+"  X:\n    deliver: [helper]\n    rules:\n      - apps: [iterm]\n        to: [git-https]\n        gate: none\n")
 	if len(probs) != 0 || c.Secrets["X"].Rules[0].Policy.Gate != GateNone {
