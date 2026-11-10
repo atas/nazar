@@ -19,6 +19,7 @@ import (
 	"runtime"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -82,7 +83,7 @@ func newFake(t *testing.T, then string) *fake {
 		run = "'" + fakePath + "' \"$@\"\n" + then + "\n"
 	}
 	script := "#!/bin/sh\nexport NAZAR_TEST_ANSWERS='" + q.Socket() + "' NAZAR_TEST_DIALOG_LOG='" + f.log + "'\n" + run
-	if err := os.WriteFile(f.program, []byte(script), 0o700); err != nil {
+	if err := writeProgram(f.program, script); err != nil {
 		t.Fatal(err)
 	}
 	return f
@@ -95,11 +96,21 @@ func script(t *testing.T, code int) string {
 	return shell(t, fmt.Sprintf("exit %d", code))
 }
 
+// writeProgram writes a file the test then runs. No fork may happen while
+// it is open for writing: a child forked then holds the descriptor until
+// its exec, and running the file meanwhile fails with "text file busy"
+// (tests run in parallel and fork all the time).
+func writeProgram(path, content string) error {
+	syscall.ForkLock.RLock()
+	defer syscall.ForkLock.RUnlock()
+	return os.WriteFile(path, []byte(content), 0o700)
+}
+
 // shell writes a program whose body is the given sh lines.
 func shell(t *testing.T, body string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "dialog")
-	if err := os.WriteFile(p, []byte("#!/bin/sh\n"+body+"\n"), 0o700); err != nil {
+	if err := writeProgram(p, "#!/bin/sh\n"+body+"\n"); err != nil {
 		t.Fatal(err)
 	}
 	return p
@@ -117,7 +128,7 @@ func newForkedFake(t *testing.T) (f *fake, pidFile string) {
 	pidFile = filepath.Join(dir, "pid")
 	script := "#!/bin/sh\nexport NAZAR_TEST_ANSWERS='" + q.Socket() + "' NAZAR_TEST_DIALOG_LOG='" + f.log + "'\n" +
 		"'" + fakePath + "' \"$@\" &\necho $! > '" + pidFile + "'\nwait\n"
-	if err := os.WriteFile(f.program, []byte(script), 0o700); err != nil {
+	if err := writeProgram(f.program, script); err != nil {
 		t.Fatal(err)
 	}
 	return f, pidFile

@@ -47,16 +47,39 @@ func sleepPath() string {
 	return p
 }
 
-// copySleep copies the system's sleep to <dir>/<name> and returns the
-// copy's path with links resolved, as /proc/<pid>/exe names it.
+// TestMain lets a copy of this test binary stand for an installed program:
+// run with a number of seconds and nothing else, it sleeps that long. The
+// system's own sleep can't be copied under another name everywhere (a
+// multi-call binary, as on Ubuntu 26.04, goes by the name it is run as).
+func TestMain(m *testing.M) {
+	if len(os.Args) == 2 {
+		if secs, err := strconv.Atoi(os.Args[1]); err == nil {
+			time.Sleep(time.Duration(secs) * time.Second)
+			os.Exit(0)
+		}
+	}
+	os.Exit(m.Run())
+}
+
+// copySleep writes a program that sleeps (a copy of this test binary, see
+// TestMain) to <dir>/<name> and returns its path with links resolved, as
+// /proc/<pid>/exe names it. No fork may happen while the copy is open for
+// writing, or running it fails with "text file busy".
 func copySleep(t *testing.T, dir, name string) string {
 	t.Helper()
-	data, err := os.ReadFile(sleepPath())
+	self, err := os.Executable()
+	if err != nil {
+		t.Fatal(err)
+	}
+	data, err := os.ReadFile(self)
 	if err != nil {
 		t.Fatal(err)
 	}
 	path := filepath.Join(dir, name)
-	if err := os.WriteFile(path, data, 0o755); err != nil {
+	syscall.ForkLock.RLock()
+	err = os.WriteFile(path, data, 0o755)
+	syscall.ForkLock.RUnlock()
+	if err != nil {
 		t.Fatal(err)
 	}
 	if path, err = filepath.EvalSymlinks(path); err != nil {
