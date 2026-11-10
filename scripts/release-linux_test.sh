@@ -102,7 +102,7 @@ for arch in amd64 arm64; do
     done
     # nazar version in each. The other architecture's binary runs only where
     # the machine can (qemu or Rosetta); where it can't, what it would print
-    # is checked in the flags it was built with. CI runs on amd64 and the
+    # is looked for in the file. CI runs on amd64 and the
     # Mac's container on arm64, so each binary really runs on one of them.
     nz="$x/$d/nazar"
     rc=0
@@ -110,7 +110,9 @@ for arch in amd64 arm64; do
     if [ "$arch" = "$host" ] || [ "$rc" -eq 0 ]; then
         same "$arch nazar version prints the version" "nazar $V (Linux preview)" "$got"
     else
-        check "$arch nazar (can't run here) is built with the version" grep -qF -- "-X main.version=$V" <<<"$(go version -m "$nz")"
+        # go version -m does not list -ldflags for a -trimpath build, so
+        # the version is looked for in the file itself.
+        check "$arch nazar (can't run here) holds the version" grep -aqF -- "$V" "$nz"
     fi
 done
 

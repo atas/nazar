@@ -1222,7 +1222,12 @@ func TestExecBetweenReadlinkAndHash(t *testing.T) {
 		t.Fatal(err)
 	}
 	copyFile(t, self, a)
-	b := filepath.Join(dir, "b")
+	// Still called sleep: a multi-call sleep (Ubuntu 26.04) goes by the
+	// name it is run as and refuses any other.
+	if err := os.Mkdir(filepath.Join(dir, "b"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	b := filepath.Join(dir, "b", "sleep")
 	copyFile(t, sleepPath(), b)
 	bytesOfB, err := os.ReadFile(b)
 	if err != nil {
