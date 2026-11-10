@@ -2,21 +2,27 @@ package main
 
 import (
 	"bufio"
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"math"
+	"os"
 	"os/exec"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
+	"syscall"
 	"text/tabwriter"
 	"time"
 
 	"github.com/atas/nazar/core/audit"
 	"github.com/atas/nazar/core/config"
 	"github.com/atas/nazar/core/control"
+	"github.com/atas/nazar/core/layout"
 )
 
 // logPredicate is fixed: user filters are applied by nazar after parsing,
@@ -135,6 +141,60 @@ func (a *app) log(args []string) int {
 	if d < time.Second {
 		return a.usageError("log: --since must be at least 1s")
 	}
+	sums := map[string]*control.AuditSummary{}
+	// entry is one message of the log, with its time for --json and its
+	// stamp for the human view.
+	entry := func(message string, t time.Time, stamp string) {
+		// ParseLine accepts exactly what the audit formatter writes: after it
+		// succeeds the message is printable ASCII (plus the ellipsis). The
+		// human view still prints it through term rather than trusting that.
+		// The parsed fields are unquoted, though, and carry the caller's raw
+		// runes again: anything printed from them goes through safe.
+		fields, err := audit.ParseLine(message)
+		if err != nil {
+			return
+		}
+		if !matchLog(fields, *target, *callerF, *decision) {
+			return
+		}
+		if summary {
+			s := sums[fields["target"]]
+			if s == nil {
+				s = &control.AuditSummary{TypeMeta: control.Meta(control.KindAuditSummary), Target: fields["target"], Decisions: map[string]int{}, Callers: map[string]int{}}
+				sums[fields["target"]] = s
+			}
+			s.Total++
+			s.Decisions[fields["decision"]]++
+			s.Callers[callerName(fields)]++
+			return
+		}
+		ev := control.AuditEvent{TypeMeta: control.Meta(control.KindAuditEvent), Time: t, Fields: fields}
+		a.emit(ev, func() {
+			fmt.Fprintf(a.stdout, "%s %s\n", stamp, term(message))
+		})
+	}
+	finish := func() int {
+		if summary {
+			a.printSummary(sums)
+		}
+		return control.ExitOK
+	}
+	if a.linux {
+		if *follow && summary {
+			return a.usageError("log summary can't --follow")
+		}
+		ctx, stop := commandContext(*follow)
+		defer stop()
+		if *follow {
+			err = a.followAuditFile(ctx, layout.AuditLog(a.home()), entry)
+		} else {
+			err = a.readAuditLog(layout.AuditLog(a.home()), time.Now().Add(-d), entry)
+		}
+		if err != nil {
+			return a.fail(control.NewProblem(control.CodeError, "reading the audit log: %v", err))
+		}
+		return finish()
+	}
 	// The identity is read before /usr/bin/log runs: without it no entry
 	// could be told from a forged one, so none is shown.
 	loc, err := a.locateApp()
@@ -160,52 +220,158 @@ func (a *app) log(args []string) int {
 	}
 	ctx, stop := commandContext(*follow)
 	defer stop()
-	sums := map[string]*control.AuditSummary{}
 	err = a.runLog(ctx, logArgs, func(b []byte) {
 		var e logEntry
 		if json.Unmarshal(b, &e) != nil || e.EventMessage == "" || !fromNazar(e, sender) {
 			return
 		}
-		// ParseLine accepts exactly what the audit formatter writes: after it
-		// succeeds the message is printable ASCII (plus the ellipsis). The
-		// human view still prints it through term rather than trusting that.
-		// The parsed fields are unquoted, though, and carry the caller's raw
-		// runes again: anything printed from them goes through safe.
-		fields, err := audit.ParseLine(e.EventMessage)
-		if err != nil {
-			return
-		}
-		if !matchLog(fields, *target, *callerF, *decision) {
-			return
-		}
-		if summary {
-			s := sums[fields["target"]]
-			if s == nil {
-				s = &control.AuditSummary{TypeMeta: control.Meta(control.KindAuditSummary), Target: fields["target"], Decisions: map[string]int{}, Callers: map[string]int{}}
-				sums[fields["target"]] = s
-			}
-			s.Total++
-			s.Decisions[fields["decision"]]++
-			s.Callers[callerName(fields)]++
-			return
-		}
 		t, terr := time.Parse(logShowTime, e.Timestamp)
-		ev := control.AuditEvent{TypeMeta: control.Meta(control.KindAuditEvent), Time: t, Fields: fields}
-		a.emit(ev, func() {
-			stamp := printable(e.Timestamp)
-			if terr == nil {
-				stamp = t.Local().Format("2006-01-02 15:04:05")
-			}
-			fmt.Fprintf(a.stdout, "%s %s\n", stamp, term(e.EventMessage))
-		})
+		stamp := printable(e.Timestamp)
+		if terr == nil {
+			stamp = t.Local().Format(logStamp)
+		}
+		entry(e.EventMessage, t, stamp)
 	})
 	if err != nil {
 		return a.fail(control.NewProblem(control.CodeError, "reading the macOS log: %v", err))
 	}
-	if summary {
-		a.printSummary(sums)
+	return finish()
+}
+
+// logStamp is how the human view of `nazar log` writes a time.
+const logStamp = "2006-01-02 15:04:05"
+
+// auditPoll is how often `nazar log --follow` looks at the audit file on Linux.
+const auditPoll = 250 * time.Millisecond
+
+// readAuditFrom reads path from offset on and returns it with the file it
+// read. O_NONBLOCK keeps a FIFO left at the path from hanging the command: it
+// opens at once and is refused as not a regular file.
+func readAuditFrom(path string, offset int64) ([]byte, os.FileInfo, error) {
+	f, err := os.OpenFile(path, os.O_RDONLY|syscall.O_NONBLOCK, 0)
+	if err != nil {
+		return nil, nil, err
 	}
-	return control.ExitOK
+	defer f.Close()
+	fi, err := f.Stat()
+	if err != nil {
+		return nil, nil, err
+	}
+	if !fi.Mode().IsRegular() {
+		return nil, nil, fmt.Errorf("%s is not a regular file", path)
+	}
+	if offset >= fi.Size() {
+		return nil, fi, nil
+	}
+	data, err := io.ReadAll(io.NewSectionReader(f, offset, fi.Size()-offset))
+	return data, fi, err
+}
+
+// readAudit is one read of an audit file; a missing file is no data and a nil
+// FileInfo.
+func (a *app) readAudit(path string, offset int64) ([]byte, os.FileInfo, error) {
+	read := a.readAuditFile
+	if read == nil {
+		read = readAuditFrom
+	}
+	data, fi, err := read(path, offset)
+	if errors.Is(err, os.ErrNotExist) {
+		return nil, nil, nil
+	}
+	return data, fi, err
+}
+
+// wholeLines is how many bytes of data end in its last newline: a last line
+// with no newline is still being written.
+func wholeLines(data []byte) int {
+	return bytes.LastIndexByte(data, '\n') + 1
+}
+
+// auditEntries gives entry each whole line of data that is an audit line, as
+// long as keep agrees with its time. Nothing says who wrote a line (the audit
+// file has no image or sender to check, as the macOS log has).
+func auditEntries(data []byte, keep func(time.Time) bool, entry func(string, time.Time, string)) {
+	for line := range strings.SplitSeq(string(data[:wholeLines(data)]), "\n") {
+		t, message, err := audit.ParseFileLine(line)
+		if err != nil || !keep(t) {
+			continue
+		}
+		entry(message, t, t.Local().Format(logStamp))
+	}
+}
+
+// readAuditLog gives entry the lines newer than since, older file first. The
+// newer file is read first: a rotation between the reads then shows as the
+// same file twice, and the newer file is read again.
+func (a *app) readAuditLog(path string, since time.Time, entry func(string, time.Time, string)) error {
+	newer, newerFile, err := a.readAudit(path, 0)
+	if err != nil {
+		return err
+	}
+	older, olderFile, err := a.readAudit(path+".1", 0)
+	if err != nil {
+		return err
+	}
+	if newerFile != nil && olderFile != nil && os.SameFile(newerFile, olderFile) {
+		if newer, _, err = a.readAudit(path, 0); err != nil {
+			return err
+		}
+	}
+	keep := func(t time.Time) bool { return t.After(since) }
+	auditEntries(older, keep, entry)
+	auditEntries(newer, keep, entry)
+	return nil
+}
+
+// followAuditFile gives entry each line added to the file from now on, until
+// ctx ends, as `log stream` does on macOS. A rotation since the last poll
+// shows as another file at path; what the old file got before it is then read
+// from .1. Two rotations within one poll lose the file between them.
+func (a *app) followAuditFile(ctx context.Context, path string, entry func(string, time.Time, string)) error {
+	always := func(time.Time) bool { return true }
+	_, cur, err := a.readAudit(path, math.MaxInt64)
+	if err != nil {
+		return err
+	}
+	var off int64
+	if cur != nil {
+		off = cur.Size()
+	}
+	tick := time.NewTicker(auditPoll)
+	defer tick.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tick.C:
+		}
+		data, fi, err := a.readAudit(path, off)
+		if err != nil {
+			return err
+		}
+		switch {
+		case cur != nil && (fi == nil || !os.SameFile(cur, fi)):
+			rest, old, err := a.readAudit(path+".1", off)
+			if err != nil {
+				return err
+			}
+			if old != nil && os.SameFile(cur, old) {
+				auditEntries(rest, always, entry)
+			}
+			off = 0
+			if data, fi, err = a.readAudit(path, 0); err != nil {
+				return err
+			}
+		case fi != nil && fi.Size() < off: // cut short in place
+			off = 0
+			if data, fi, err = a.readAudit(path, 0); err != nil {
+				return err
+			}
+		}
+		cur = fi
+		auditEntries(data, always, entry)
+		off += int64(wholeLines(data))
+	}
 }
 
 // lastWindow renders d for `log show --last`: whole minutes when exact,

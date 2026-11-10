@@ -82,6 +82,7 @@ type Registry struct {
 	v      platform.Vault
 	pubDir string
 	now    func() time.Time
+	tr     platform.Traits // p's, for the words of its errors
 }
 
 // NewRegistry returns a registry over p and v that exports public keys to
@@ -90,7 +91,7 @@ func NewRegistry(p platform.Platform, v platform.Vault, pubDir string, now func(
 	if now == nil {
 		now = time.Now
 	}
-	return &Registry{p: p, v: v, pubDir: pubDir, now: now}
+	return &Registry{p: p, v: v, pubDir: pubDir, now: now, tr: platform.TraitsOf(p)}
 }
 
 // Create makes a new Secure Enclave signing key protected by auth and access, stores
@@ -115,10 +116,10 @@ func (r *Registry) Create(name string, auth platform.AuthPolicy, access platform
 
 	handle, raw, err := r.p.CreateKey(platform.PurposeSign, auth, access)
 	if errors.Is(err, platform.ErrLocked) {
-		return Info{}, platform.Locked("keys: the Mac is locked; a key that works only while it's unlocked can't be made now")
+		return Info{}, platform.Locked(fmt.Sprintf("keys: %s is locked; a key that works only while it's unlocked can't be made now", r.tr.Machine))
 	}
 	if err != nil {
-		return Info{}, fmt.Errorf("keys: create enclave key: %w", err)
+		return Info{}, fmt.Errorf("keys: create %s key: %w", r.tr.KeyChip(), err)
 	}
 	ecpub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), raw)
 	if err != nil {
@@ -172,7 +173,7 @@ func (r *Registry) checkFree(name string) error {
 // returns cause, joined with the delete error if that fails too.
 func (r *Registry) discard(handle []byte, cause error) error {
 	if err := r.p.DeleteKey(handle); err != nil && !errors.Is(err, platform.ErrNotFound) {
-		return errors.Join(cause, fmt.Errorf("keys: delete orphaned enclave key: %w", err))
+		return errors.Join(cause, fmt.Errorf("keys: delete orphaned %s key: %w", r.tr.KeyChip(), err))
 	}
 	return cause
 }
@@ -238,7 +239,7 @@ func infoOf(rec record, pub ssh.PublicKey) Info {
 // decode parses a Vault record for name. Anything that is not a complete,
 // self-consistent ecdsa-sha2-nistp256 record is errBroken; whatever did
 // parse is still returned so Delete can try to free the enclave key.
-func decode(name string, b []byte) (record, ssh.PublicKey, error) {
+func decode(name string, b []byte, chip string) (record, ssh.PublicKey, error) {
 	var rec record
 	if err := json.Unmarshal(b, &rec); err != nil {
 		return record{}, nil, fmt.Errorf("%w: %s: %v", errBroken, name, err)
@@ -250,7 +251,7 @@ func decode(name string, b []byte) (record, ssh.PublicKey, error) {
 		return broken("record name does not match")
 	}
 	if len(rec.Handle) == 0 {
-		return broken("no enclave handle")
+		return broken("no " + chip + " handle")
 	}
 	if rec.Auth != platform.AuthNone && rec.Auth != platform.AuthUserPresence {
 		return broken("unknown auth policy " + rec.Auth.String())
@@ -282,7 +283,7 @@ func (r *Registry) load(name string) (record, ssh.PublicKey, error) {
 	if err != nil {
 		return record{}, nil, fmt.Errorf("keys: read vault item %s%s: %w", VaultPrefix, name, err)
 	}
-	return decode(name, b)
+	return decode(name, b, r.tr.KeyChip())
 }
 
 // Get returns one key. A record that is in the Vault but cannot be read
@@ -377,7 +378,7 @@ func (r *Registry) Delete(name string) error {
 		}
 		if !shared {
 			if err := r.p.DeleteKey(rec.Handle); err != nil && !errors.Is(err, platform.ErrNotFound) {
-				return fmt.Errorf("keys: delete enclave key: %w", err)
+				return fmt.Errorf("keys: delete %s key: %w", r.tr.KeyChip(), err)
 			}
 		}
 	}
@@ -431,7 +432,7 @@ func (r *Registry) Sign(name string, data []byte, ref platform.ApprovalRef) (*ss
 	}
 	der, err := r.p.Sign(rec.Handle, data, ref)
 	if errors.Is(err, platform.ErrLocked) && rec.Access == platform.AccessWhenUnlocked {
-		return nil, platform.Locked(fmt.Sprintf("keys: the Mac is locked; %s signs only while it's unlocked", name))
+		return nil, platform.Locked(fmt.Sprintf("keys: %s is locked; %s signs only while it's unlocked", r.tr.Machine, name))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("keys: sign with %s: %w", name, err)
@@ -441,7 +442,7 @@ func (r *Registry) Sign(name string, data []byte, ref platform.ApprovalRef) (*ss
 		return nil, fmt.Errorf("keys: sign with %s: %w", name, err)
 	}
 	if err := pub.Verify(data, sig); err != nil {
-		return nil, fmt.Errorf("keys: enclave signature for %s does not verify (key broken?): %w", name, err)
+		return nil, fmt.Errorf("keys: %s signature for %s does not verify (key broken?): %w", r.tr.KeyChip(), name, err)
 	}
 	return sig, nil
 }

@@ -11,7 +11,11 @@ import (
 // nazar with Homebrew has /opt/homebrew/bin/nazar-sign-git, which changed
 // the setup advice (and broke TestUIFixtures) on that Mac only.
 func TestMain(m *testing.M) {
+	if sock := os.Getenv(controlChildEnv); sock != "" {
+		os.Exit(serveControlChild(sock))
+	}
 	brewBinDirs = nil
+	linuxBrewBinDirs = nil
 	os.Exit(m.Run())
 }
 

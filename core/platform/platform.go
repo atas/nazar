@@ -18,6 +18,8 @@ var (
 	// ErrLocked: the chip refused a key made with AccessWhenUnlocked
 	// because the Mac is locked. The platform may tell it only from an
 	// operation that already failed; it never decides anything by it.
+	// Its text names the Mac: a platform that is not the Mac returns
+	// Locked worded with its own Traits().Machine, never this bare.
 	ErrLocked = errors.New("platform: the Mac is locked")
 	// ErrAmbiguous: InstalledApp found several bundles for the bundle ID
 	// signed by different teams, so there is no one team to pin.
@@ -33,6 +35,20 @@ type lockedError string
 
 func (e lockedError) Error() string        { return string(e) }
 func (e lockedError) Is(target error) bool { return target == ErrLocked }
+
+// NotFoundError is ErrNotFound with the reason, when the platform knows
+// one and the user needs it: an app whose entry exists but whose program
+// cannot be matched to any process (on Linux a desktop entry that runs a
+// launcher or a script). errors.Is(err, ErrNotFound) holds, so every
+// caller that handles ErrNotFound still does; a caller that words the
+// refusal shows Reason in place of "not installed". Reason is one plain
+// sentence about the app ("its program ... is a shell ..."), with any
+// path or name from disk quoted ASCII-only, as the core shows them. The
+// macOS platform never returns one.
+type NotFoundError struct{ Reason string }
+
+func (e *NotFoundError) Error() string        { return e.Reason }
+func (e *NotFoundError) Is(target error) bool { return target == ErrNotFound }
 
 // DialogHow says how a `dialog` gate ended without an Allow, for the audit
 // log (since Milestone 5). The values cross the C bridge as the `allowed`
@@ -194,8 +210,9 @@ type Prompt struct {
 // token's pidversion still matches; a parent found while walking the chain
 // is named by KERN_PROC_PID's ppid, a bare PID, and the responsible-process
 // lookup also returns a bare PID. On Linux it is the start ticks from
-// /proc/<pid>/stat. The fake uses any number unique per launch. Core code
-// never interprets the value; it only compares refs for equality.
+// /proc/<pid>/stat plus one, so it is never zero. The fake uses any number
+// unique per launch. Core code never interprets the value; it only
+// compares refs for equality.
 //
 // Generation 0 means a PID-only ref: the platform knows the PID but not
 // which instance holds it. ProcessInfo.Parent and ResponsibleFor may return

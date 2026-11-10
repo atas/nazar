@@ -2,6 +2,9 @@
 # Release → Run workflow). It builds, signs (Developer ID), notarizes,
 # publishes the GitHub release and updates atas/homebrew-tap. The signing
 # secrets live in the `release` environment only. docs/RELEASING.md.
+#
+# Linux is a separate job with no secret and no environment. The macOS job runs
+# after it, whatever it did, and publishes its files only when it built.
 name: Release
 
 on:
@@ -54,12 +57,15 @@ jobs:
                   echo "releasing $v (after ${last:-nothing})"
                   echo "version=$v" >> "$GITHUB_OUTPUT"
 
+    # After linux, whatever linux did: a failed Linux job does not stop macOS.
+    # !cancelled() and not always(), so cancelling the run still stops a release.
+    # The hour the macOS steps always had, and 15 minutes for the Linux steps.
     release:
-        needs: plan
-        if: needs.plan.outputs.version != ''
+        needs: [plan, linux]
+        if: ${{ !cancelled() && needs.plan.outputs.version != '' }}
         runs-on: ${{ vars.RELEASE_RUNNER || 'macos-26' }}
         environment: release
-        timeout-minutes: 60
+        timeout-minutes: 75
         env:
             V: ${{ needs.plan.outputs.version }}
             NAZAR_SIGN_ID: ${{ vars.NAZAR_SIGN_ID }}
@@ -133,24 +139,114 @@ jobs:
                       [ "$got" = "$want" ] || { echo "$z: downloaded $got, built $want" >&2; exit 1; }
                   done
 
+            # The Linux steps may fail without failing the job until the tap is
+            # pushed: the casks go whatever happens here. Nothing in the artifact
+            # runs in this job; it is uploaded, summed and read for its sums.
+            - name: Download the Linux files
+              id: get-linux
+              if: needs.linux.result == 'success'
+              continue-on-error: true
+              timeout-minutes: 5
+              uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+              with:
+                  name: linux
+                  path: build/release-linux
+
+            - name: Publish Linux
+              id: publish-linux
+              if: needs.linux.result == 'success' && steps.get-linux.outcome == 'success'
+              continue-on-error: true
+              timeout-minutes: 10
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  dir=build/release-linux
+                  amd="nazar-$V-linux-amd64.tar.gz"
+                  arm="nazar-$V-linux-arm64.tar.gz"
+                  gh release upload "v$V" --repo "$GITHUB_REPOSITORY" \
+                      "$dir/$amd" "$dir/$arm" "$dir/SHA256SUMS" "$dir/install.sh"
+                  for f in "$amd" "$arm" install.sh; do
+                      got=$(curl -fsSL "https://github.com/$GITHUB_REPOSITORY/releases/download/v$V/$f" | shasum -a 256 | cut -d' ' -f1)
+                      want=$(awk -v f="$f" '$2 == f { print $1 }' "$dir/SHA256SUMS")
+                      [ -n "$want" ] && [ "$got" = "$want" ] || { echo "$f: downloaded $got, SHA256SUMS says $want" >&2; exit 1; }
+                  done
+                  gh release view "v$V" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$RUNNER_TEMP/notes.md"
+                  printf '\n%s\n' "Linux (preview, not yet verified on real hardware): nazar-$V-linux-amd64.tar.gz, nazar-$V-linux-arm64.tar.gz, SHA256SUMS, install.sh" >> "$RUNNER_TEMP/notes.md"
+                  gh release edit "v$V" --repo "$GITHUB_REPOSITORY" --notes-file "$RUNNER_TEMP/notes.md"
+                  scripts/release-linux.sh formula "$V" "$dir/SHA256SUMS" build/tap-out
+
             - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
               with:
                   repository: atas/homebrew-tap
                   path: tap
                   ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
 
+            # The formula is there only when the Linux files were published.
+            # It goes to the tap's root, next to the tap's other formulae:
+            # Homebrew reads formulae from Formula/ alone once that folder
+            # exists, so making one would hide the others from every Mac.
             - name: Update the tap
               run: |
                   set -euo pipefail
                   mkdir -p tap/Casks
                   make release-tap TAP=tap
+                  if [ -f build/tap-out/nazar-linux.rb ]; then
+                      cp build/tap-out/nazar-linux.rb tap/
+                  fi
                   cd tap
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git add Casks
+                  if [ -f nazar-linux.rb ]; then git add nazar-linux.rb; fi
                   git commit -m "nazar $V"
                   git push
+
+            - name: Say that Linux was not published
+              if: needs.linux.result == 'success' && steps.publish-linux.outcome != 'success'
+              run: |
+                  echo "::error::the casks are pushed, but the Linux files were not published: see the Publish Linux step and docs/RELEASING.md"
+                  exit 1
 
             - name: Remove the keychain
               if: always()
               run: security delete-keychain "$RUNNER_TEMP/release.keychain-db" || true
+
+    # The Linux tarballs. No secret and no environment: this job runs the tests
+    # and only hands its files on. Every step has its own timeout and the job has
+    # none: a step that times out fails, and macOS runs after a failure. What a
+    # job-level timeout does to the jobs that need this one is not documented.
+    linux:
+        needs: plan
+        if: needs.plan.outputs.version != ''
+        runs-on: ubuntu-latest
+        permissions:
+            contents: read
+        env:
+            V: ${{ needs.plan.outputs.version }}
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              timeout-minutes: 5
+              with:
+                  persist-credentials: false
+
+            # No restored build cache in a release build.
+            - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+              timeout-minutes: 5
+              with:
+                  go-version-file: go.mod
+                  cache: false
+
+            - run: make test
+              timeout-minutes: 30
+
+            - name: Build the tarballs
+              timeout-minutes: 10
+              run: scripts/release-linux.sh tarballs "$V" build/release-linux
+
+            - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+              timeout-minutes: 5
+              with:
+                  name: linux
+                  path: build/release-linux
+                  if-no-files-found: error

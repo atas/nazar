@@ -23,6 +23,36 @@ commits, or when you run it (Actions → Release → Run workflow; optional vers
 next patch version, builds, signs, notarizes, publishes and updates the tap. Its secrets live in
 the `release` environment only (`scripts/release_test.sh` checks).
 
+**Linux (preview).** The same release also carries Linux files, and the tap a formula:
+
+| File | Holds |
+|---|---|
+| `nazar-X.Y.Z-linux-amd64.tar.gz`, `nazar-X.Y.Z-linux-arm64.tar.gz` | `nazar`, `nazar-agent`, `LICENSE`, `README.md` in a folder of the same name |
+| `SHA256SUMS` | the sums of the two tarballs and `install.sh` |
+| `install.sh` | installs into `~/.local/lib/nazar/X.Y.Z` and links `~/.local/bin/nazar`; never runs sudo |
+| `nazar-linux.rb` at the tap's root | rendered from `packaging/homebrew/nazar-linux.rb.in` |
+
+The binaries are static, carry no build tags and are not signed: checksums only in v1. A formula
+named `nazar` would win over the macOS cask, so it is `nazar-linux`. It sits at the tap's root,
+next to the tap's other formulae (`autotunnel.rb`), never under `Formula/`: once a tap has that
+folder Homebrew reads formulae from it alone, and the root ones would vanish from every Mac.
+Linux stays labelled preview until it has been checked on real hardware or a VM with a vTPM.
+
+The workflow has three jobs:
+
+| Job | Runs on | Secrets | Does |
+|---|---|---|---|
+| `plan` | Ubuntu | none | picks the version |
+| `linux` | Ubuntu | none, no environment | `make test`, `scripts/release-linux.sh tarballs`, and hands on the files |
+| `release` | macOS | the `release` environment | builds, signs, notarizes and publishes the zips, publishes the Linux files, and pushes the casks and the formula |
+
+`release` runs after `linux`, whatever `linux` did: a failed Linux job does not stop macOS, it only
+makes the release start later. Cancelling the run stops both. When `release` fails before it
+publishes, nothing is published for Linux either: the Linux files need the release and the tag that
+job creates. When Linux fails, whether in its own job or while `release` publishes it, the casks are
+pushed alone, the last formula stays and the run shows as failed. See
+[Linux failed](#linux-failed).
+
 ## Once
 
 1. **You.** Join the [Apple Developer Program](https://developer.apple.com/programs/enroll/)
@@ -102,6 +132,51 @@ with the released CLI (spec 12).
    Upgrade, on an account with the previous release and a key: `brew upgrade --cask nazar`, then
    `nazar ssh-key list` still lists the key and `ssh -T git@github.com` signs with it. Uninstall:
    `brew uninstall --cask nazar` stops the agent and keeps `~/.nazar`.
+5. **You.** Linux, on a machine or VM with a TPM (the automated tests use a software TPM, so this
+   is the step that can end the preview):
+
+   ```bash
+   brew install atas/tap/nazar-linux             # or the release's install.sh
+   nazar version                                 # nazar X.Y.Z (Linux preview)
+   sudo "$(command -v nazar)" install --system   # once, then log out and back in
+   nazar install --no-links                      # after install.sh: nazar install
+   nazar status                                  # the agent answers
+   ```
+
+   `nazar status` proves the TPM and the agent. The rest of the preview is what no test has ever
+   run (threat model 7.6): the real desktop. Check each, on GNOME and on KDE if you can:
+
+   ```bash
+   nazar ssh-key create probe                    # the login gate: the desktop's own polkit prompt, your password
+   nazar secret add PROBE < /dev/null            # a second login prompt; deny it: exit 3, nothing stored
+   nazar ssh-key rule add probe --apps any --gate dialog --scope use --allow-loosen-access
+   ssh-add -L                                    # the dialog gate: a real zenity or kdialog window; Allow, then Deny
+   # lock the screen, then from a terminal: ssh-add -L  → the log says the screen is locked (nazar log --since 5m)
+   # unlock; a session-scope approval made before the lock must ask again
+   # switch to a tty (Ctrl-Alt-F3), run ssh-add -L there: an error, no graphical session, no hang
+   # run a blocked program (no rule): a desktop notification with the suggested rule
+   # a stale DISPLAY: DISPLAY=:9 is not the agent's, so instead stop the compositor's socket or
+   #   log out of the graphical session and run ssh-add -L from a tty: the log says error, not denied
+   nazar ssh-key delete probe
+   ```
+
+   Also look at the polkit prompt itself (its text is the request's lines, with the caller's
+   command line) and at the dialog's buttons (Enter on Deny, Tab then Space on Allow).
+
+## Linux failed
+
+The macOS release is out and the casks are pushed. Fix it forward: the next release, once main has
+a new commit, carries Linux again. Do not re-run the failed jobs of the run: GitHub re-runs what
+depends on them too, so `release` builds, signs and notarizes again and then stops at Publish,
+because the tag is already there. It changes nothing, and Linux is still not published.
+
+If `Publish Linux` uploaded some files before it failed, this release shows Linux files with no
+notes line and no formula. Delete them so nobody takes them for a finished release
+(`gh release delete-asset vX.Y.Z FILE`).
+
+To look at the tarballs without releasing: `make linux-tarballs VERSION=X.Y.Z` on Linux leaves them
+in `build/release-linux`; on a Mac, `make linux-run CMD='make linux-tarballs VERSION=X.Y.Z'` builds
+them in the container's copy of the tree.
 
 ## Rollback
 
@@ -114,7 +189,10 @@ with the released CLI (spec 12).
    ```
 
    Anyone who already upgraded goes back with `brew update && brew reinstall --cask nazar`; the
-   previous release has the same signature, so the keys stay.
+   previous release has the same signature, so the keys stay. The revert takes the formula back
+   too. On Linux, `brew update && brew reinstall nazar-linux` and then `nazar install --no-links`,
+   or the release's `install.sh X.Y.Z` and then `nazar install`: the CLI and the agent trust each
+   other by the hashes `nazar install` recorded.
 2. Hide or remove the release: `gh release edit vX.Y.Z --draft` (assets no longer downloadable)
    or `gh release delete vX.Y.Z --cleanup-tag`.
 3. Fix forward as `X.Y.Z+1`. Never upload different zips under a published tag: the cask's

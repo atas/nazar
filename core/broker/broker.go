@@ -301,7 +301,7 @@ func (b *Broker) Handle(req Request) (res Result) {
 			return finish(audit.Denied, reason)
 		}
 		if errors.Is(err, platform.ErrAuthRequired) {
-			return finish(audit.Error, "key requires the login gate (it was created with Secure Enclave user presence): "+err.Error())
+			return finish(audit.Error, "key requires the login gate (it was created with "+platform.TraitsOf(b.o.Platform).Presence()+"): "+err.Error())
 		}
 		return finish(audit.Error, err.Error())
 	}

@@ -197,6 +197,9 @@ func (a *app) completeMatchers(_ *cobra.Command, _ []string, toComplete string) 
 		prefix = toComplete[:i+1]
 	}
 	refs := []string{"any\tany caller", "unknown\ta chain with no app", "app:\tapp:<bundle-id>", "signed:\tsigned:<team>[:<id>]", "path:\tpath:<absolute path>"}
+	if a.linux { // no code signatures: no signed:, and app: names a desktop app id
+		refs = []string{"any\tany caller", "unknown\ta chain with no app", "app:\tapp:<app-id>", "path:\tpath:<absolute path>"}
+	}
 	var l control.AppList
 	if a.completionList(control.CmdAppsList, &l) {
 		seen := map[string]bool{}

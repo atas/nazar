@@ -524,6 +524,12 @@ func (p *parser) inlineMatcher(n *yaml.Node, path string) (Matcher, bool) {
 	before := len(p.probs)
 	var m Matcher
 	switch {
+	case f["signed"] != nil && p.env.NoCodeSigning:
+		p.errorf(f["signed"], path, "signed: needs macOS code signatures; on Linux name the program's file with path: or a desktop app with app:")
+		return Matcher{}, false
+	case f["app"] != nil && f["team"] != nil && p.env.NoCodeSigning:
+		p.errorf(f["team"], path, "team: is macOS only; on Linux an app: rule pins the app's executable when the change is approved")
+		return Matcher{}, false
 	case f["signed"] != nil:
 		sf := p.mapping(f["signed"], join(path, "signed"), "team", "id")
 		if sf == nil {
@@ -1027,6 +1033,9 @@ func (p *parser) deliver(n *yaml.Node, path string) []Delivery {
 			p.errorf(it, path, "%s is listed twice", d)
 		case d.Built():
 			out = append(out, d)
+			if d == DeliverLateEnv && p.env.NoCodeSigning {
+				p.warnf(it, path, "deliver: late-env (nazar run) is not available on Linux yet; use helper or stdout")
+			}
 		case d == DeliverFile || d == DeliverEnv:
 			p.errorf(it, path, "%s is not in this version (helper, late-env and stdout are)", d)
 		default:
@@ -1105,7 +1114,10 @@ func (p *parser) rule(n *yaml.Node, path string, index int, c *Config, kind entr
 			}
 			// unknown is as wide as any: a program can make itself unknown
 			// by leaving its chain (spec 4.2), so both say every program.
-			who := "every program on this Mac"
+			who, chip := "every program on this Mac", "the Secure Enclave"
+			if p.env.NoCodeSigning { // Linux
+				who, chip = "every program on this computer", "the TPM"
+			}
 			if kind == entryK8s {
 				p.errorf(f["apps"], join(path, "apps"), "rule %d would give this context's credential to %s without asking; name the apps", r.Index, who)
 			} else if kind == entryAWS {
@@ -1113,7 +1125,7 @@ func (p *parser) rule(n *yaml.Node, path string, index int, c *Config, kind entr
 			} else if kind == entrySecret {
 				p.errorf(f["apps"], join(path, "apps"), "rule %d would give this secret to %s without asking; name the apps", r.Index, who)
 			} else {
-				p.warnf(f["apps"], join(path, "apps"), "Rule %d lets %s use this key without asking. The key itself never leaves the Secure Enclave.", r.Index, who)
+				p.warnf(f["apps"], join(path, "apps"), "Rule %d lets %s use this key without asking. The key itself never leaves %s.", r.Index, who, chip)
 			}
 			break
 		}

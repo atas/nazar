@@ -25,7 +25,18 @@ import (
 // and closes the connection; the agent watches the exec, not the socket.
 var errGotPlan = errors.New("got the plan")
 
+// testRunOnLinux is set only in the nazartest build (run_testlinux.go), for
+// core/daemon's end-to-end tests of the late-env protocol on Linux. The
+// release build never sets it, so it always refuses there
+// (TestReleaseBuildHasNoRunOnLinux, TestShippedCLIRefusesRun).
+var testRunOnLinux func(getenv func(string) string) bool
+
 func (a *app) runSecret(args []string) int {
+	if a.linux && (testRunOnLinux == nil || !testRunOnLinux(a.getenv)) {
+		// Before anything else: no prompt, no exec, no argument judged
+		// for a command that can't run here.
+		return a.fail(control.NewProblem(control.CodeError, "run: %s", runOnLinux))
+	}
 	sep := slices.Index(args, "--")
 	if sep < 0 {
 		return a.usageError("run: the command goes after --: nazar run --secret NAME -- command")

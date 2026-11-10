@@ -43,6 +43,9 @@ type Fake struct {
 	// foreign: writers whose pipe's read end another process holds too,
 	// or the reader inherited.
 	foreign map[platform.ProcessRef]bool
+	// through: the shell between a scripted writer and its reader that
+	// holds the write end on its fd 1 too (platform.StdoutThrough).
+	through map[platform.ProcessRef]platform.ProcessRef
 	// StdoutFunc, when set, answers StdoutReadBy instead (error injection).
 	StdoutFunc func(writer, reader platform.ProcessRef) (bool, error)
 	// Mounts (mounts.go): the watches on.
@@ -84,6 +87,7 @@ func New(start time.Time) *Fake {
 		peers:       map[int]platform.ProcessRef{},
 		stdout:      map[platform.ProcessRef]platform.ProcessRef{},
 		foreign:     map[platform.ProcessRef]bool{},
+		through:     map[platform.ProcessRef]platform.ProcessRef{},
 	}
 	f.gates.init()
 	f.enclave.init()

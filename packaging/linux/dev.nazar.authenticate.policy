@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE policyconfig PUBLIC "-//freedesktop//DTD PolicyKit Policy Configuration 1.0//EN"
+ "http://www.freedesktop.org/standards/PolicyKit/1/policyconfig.dtd">
+<policyconfig>
+  <vendor>nazar</vendor>
+  <vendor_url>https://github.com/atas/nazar</vendor_url>
+  <action id="dev.nazar.authenticate">
+    <description>Approve a nazar request</description>
+    <message>$(nazar.prompt)</message>
+    <defaults>
+      <allow_any>auth_self</allow_any>
+      <allow_inactive>auth_self</allow_inactive>
+      <allow_active>auth_self</allow_active>
+    </defaults>
+    <annotate key="org.freedesktop.policykit.owner">@NAZAR_OWNERS@</annotate>
+  </action>
+</policyconfig>

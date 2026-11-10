@@ -467,3 +467,34 @@ func TestEvaluateK8sLeftoverClientsLineIsOff(t *testing.T) {
 		t.Fatalf("another context still works: %+v", out)
 	}
 }
+
+// On a platform without code signatures (Linux: Traits.CodeSigning false,
+// Engine.NoCodeSigning) no process is ever Signed, and what identifies the
+// program that ran nazar is the file it runs and that file's hash: the
+// identity its approval is remembered under (match.Identity, "path:…#hash").
+// A record with either missing still fails check 1, and with code signing
+// (the default, macOS) nothing changes: an unsigned program stays
+// unidentified, as TestEvaluateK8sClientIdentity says.
+func TestEvaluateK8sNoCodeSigningIdentifiesByPathAndHash(t *testing.T) {
+	en := newK8sEnv(t)
+	en.e.NoCodeSigning = true
+	kubectl := kubectlProc("get", "pods")
+	kubectl.Code = platform.CodeIdentity{CDHash: []byte{0x01}}
+	tab := en.f.ITermTab(platform.ProcessRef{}, kubectl, credProc("hydra"))
+	out := en.ok("hydra", tab.Peer())
+	if out.Reason == ReasonK8sCaller || out.Policy.Gate == config.GateBlock || out.Receiver != "path:/opt/homebrew/bin/kubectl#01" {
+		t.Fatalf("an unsigned kubectl with a hash, no code signing: %+v", out)
+	}
+	noHash := kubectlProc("get", "pods")
+	noHash.Code = platform.CodeIdentity{}
+	tab = en.f.ITermTab(platform.ProcessRef{}, noHash, credProc("hydra"))
+	if out := en.ok("hydra", tab.Peer()); out.Reason != ReasonK8sCaller || out.Policy.Gate != config.GateBlock || out.Receiver != "" {
+		t.Fatalf("no hash: %+v", out)
+	}
+	noPath := kubectlProc("get", "pods")
+	noPath.Path, noPath.Code = "", platform.CodeIdentity{CDHash: []byte{0x01}}
+	tab = en.f.ITermTab(platform.ProcessRef{}, noPath, credProc("hydra"))
+	if out := en.ok("hydra", tab.Peer()); out.Reason != ReasonK8sCaller || out.Policy.Gate != config.GateBlock || out.Receiver != "" {
+		t.Fatalf("no path: %+v", out)
+	}
+}

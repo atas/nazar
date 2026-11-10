@@ -279,17 +279,13 @@ func (a *app) k8sCACreate(args []string) int {
 		return a.fail(control.NewProblem(control.CodeError, "k8s ca create: nazar-agent's reply has no usable CA certificate or identity; nazar k8s list shows the context"))
 	}
 	if *onlyWhenUnlocked && ctx.CA.WhileLocked {
-		return a.fail(wrongAccess("the CA of "+name, "nazar k8s forget "+name))
+		return a.fail(a.wrongAccess("the CA of "+name, "nazar k8s forget "+name))
 	}
 	return a.emit(res, func() {
 		user := ctx.Identity.User
-		fmt.Fprintf(a.stdout, "%s is set up: its CA is in the Secure Enclave (SHA-256 %s), config.yaml has k8s.contexts.%s.\n",
-			name, term(ctx.CA.Fingerprint), name)
-		if ctx.CA.WhileLocked {
-			fmt.Fprintln(a.stdout, "The CA signs while the Mac is locked too, once you have logged in since it started (fixed for its life).")
-		} else {
-			fmt.Fprintln(a.stdout, "The CA signs only while the Mac is unlocked (fixed for its life).")
-		}
+		fmt.Fprintf(a.stdout, "%s is set up: its CA is in %s (SHA-256 %s), config.yaml has k8s.contexts.%s.\n",
+			name, a.traits().Chip, term(ctx.CA.Fingerprint), name)
+		fmt.Fprintln(a.stdout, a.caLockedLine(ctx.CA.WhileLocked))
 		if res.Added {
 			fmt.Fprintf(a.stdout, "Added the context %s and the cluster and user %s to %s.\n", name, kubeconfig.EntryName(name), term(ch.Path))
 		} else {
@@ -304,7 +300,7 @@ func (a *app) k8sCACreate(args []string) int {
 			admin += " --context " + cur
 		}
 		fmt.Fprintf(a.stdout, "\nThen give %s a role, with your current admin access:\n  %s create clusterrolebinding %s --clusterrole=cluster-admin --user=%s\n", user, admin, user, user)
-		fmt.Fprintf(a.stdout, "\nThen use it (Touch ID once per tab):\n  kubectl --context %s get pods\n", name)
+		fmt.Fprintf(a.stdout, "\nThen use it (%s once per tab):\n  kubectl --context %s get pods\n", a.traits().LoginGate, name)
 	})
 }
 

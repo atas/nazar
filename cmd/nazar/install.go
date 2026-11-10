@@ -165,6 +165,9 @@ var linkNames = []string{cliExeName, signGitName, gitCredentialName}
 // bundle. Running it again repairs the setup. Every check runs before the
 // first write or launchctl call, so a refusal changes nothing.
 func (a *app) install(args []string) int {
+	if a.linux {
+		return a.installLinux(args)
+	}
 	binDir, noLinks, err := a.installFlags("install", args)
 	if err != nil {
 		return a.fail(err)
@@ -197,15 +200,8 @@ func (a *app) install(args []string) int {
 	if err := checkRemovable(legacy); err != nil {
 		return a.fail(err)
 	}
-	dot := layout.Root(a.home())
-	if err := os.Mkdir(dot, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+	if err := a.ensurePrivateRoot(); err != nil {
 		return a.fail(err)
-	}
-	if err := unixsock.CheckPrivateDir(dot); err != nil {
-		if fi, lerr := os.Lstat(dot); lerr == nil && fi.IsDir() {
-			return a.fail(control.NewProblem(control.CodeError, "%v (fix it with: chmod 700 %s)", err, dot))
-		}
-		return a.fail(control.NewProblem(control.CodeError, "%v (move it away: %s must be a private folder)", err, dot))
 	}
 	domain := "gui/" + strconv.Itoa(a.uid())
 	mig, err := a.migrate(domain, loc.CLI, binDir, noLinks)
@@ -256,6 +252,22 @@ func (a *app) install(args []string) int {
 		}
 		a.printMigration(mig)
 	})
+}
+
+// ensurePrivateRoot makes ~/.nazar when it is missing and says how to fix it
+// when it is not a private folder of this user.
+func (a *app) ensurePrivateRoot() error {
+	dot := layout.Root(a.home())
+	if err := os.Mkdir(dot, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
+		return err
+	}
+	if err := unixsock.CheckPrivateDir(dot); err != nil {
+		if fi, lerr := os.Lstat(dot); lerr == nil && fi.IsDir() {
+			return control.NewProblem(control.CodeError, "%v (fix it with: chmod 700 %s)", err, dot)
+		}
+		return control.NewProblem(control.CodeError, "%v (move it away: %s must be a private folder)", err, dot)
+	}
+	return nil
 }
 
 // printMigration is the human view of what install or uninstall removed of
@@ -419,6 +431,9 @@ func bootstrapEIO(err error) bool {
 // (dev.nazar) when it is still there, and the links in the bin folder that
 // point into a nazar bundle. Keys, config and the Keychain items are kept.
 func (a *app) uninstall(args []string) int {
+	if a.linux {
+		return a.uninstallLinux(args)
+	}
 	binDir, _, err := a.installFlags("uninstall", args)
 	if err != nil {
 		return a.fail(err)

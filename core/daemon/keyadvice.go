@@ -40,7 +40,7 @@ func (d *Daemon) keyAdvice(c *config.Config) []control.ConfigProblem {
 		if k.Broken {
 			continue
 		}
-		msg := presenceAdvice(c, k.Name, k.Auth)
+		msg := presenceAdviceOn(d.traits, c, k.Name, k.Auth)
 		if msg == "" {
 			continue
 		}
@@ -75,8 +75,19 @@ func gateSources(c *config.Config, name string) []gateSource {
 }
 
 // presenceAdvice is the advice for key name created with auth under c, or
-// "". The name is quoted ASCII-only like every config-derived value shown.
+// "", worded for macOS. The name is quoted ASCII-only like every
+// config-derived value shown.
 func presenceAdvice(c *config.Config, name string, auth platform.AuthPolicy) string {
+	return presenceAdviceOn(platform.MacTraits, c, name, auth)
+}
+
+// presenceAdviceOn is presenceAdvice worded for a platform with traits tr.
+func presenceAdviceOn(tr platform.Traits, c *config.Config, name string, auth platform.AuthPolicy) string {
+	// byNazar: nazar, not a chip, asks for a user-presence key (Linux,
+	// spec "Weaker than macOS" 3). Its approval of such a key lasts as long
+	// as nazar remembers it, and nothing below nazar holds a compromised
+	// nazar back.
+	byNazar := tr.Enforcer != platform.MacTraits.Enforcer
 	srcs := gateSources(c, name)
 	switch auth {
 	case platform.AuthUserPresence:
@@ -90,8 +101,12 @@ func presenceAdvice(c *config.Config, name string, auth platform.AuthPolicy) str
 			}
 		}
 		if len(weak) > 0 {
-			return fmt.Sprintf("SSH key %s was created with Secure Enclave user presence, but %s can reach it, so those requests fail; re-create the key without user presence",
-				strconv.QuoteToASCII(name), joinAnd(weak))
+			return fmt.Sprintf("SSH key %s was created with %s, but %s can reach it, so those requests fail; re-create the key without user presence",
+				strconv.QuoteToASCII(name), tr.Presence(), joinAnd(weak))
+		}
+		if len(lapsing) > 0 && byNazar {
+			return fmt.Sprintf("SSH key %s was created with %s, but %s remembers an approval, so the key does not ask on every use while that approval lasts; use scope: use, or re-create the key without user presence",
+				strconv.QuoteToASCII(name), tr.Presence(), joinAnd(lapsing))
 		}
 		if len(lapsing) > 0 {
 			return fmt.Sprintf("SSH key %s was created with Secure Enclave user presence, but %s remembers an approval longer than the Secure Enclave honours one (minutes), so those requests fail once it lapses; re-create the key without user presence or use scope: use",
@@ -101,6 +116,12 @@ func presenceAdvice(c *config.Config, name string, auth platform.AuthPolicy) str
 	case platform.AuthNone:
 		if !c.NeedsUserPresence(name) {
 			return "" // a dialog, none or remembered login can reach it, or nothing may use it yet
+		}
+		if byNazar {
+			// Re-created with user presence, the key would be asked for by
+			// the same nazar that runs its gates: no added protection, so
+			// no advice to destroy the key and hand out a new public key.
+			return ""
 		}
 		return fmt.Sprintf("SSH key %s was created without Secure Enclave user presence, but every gate that can reach it is block or login with scope: use, so it could be re-created with user presence (then even a compromised nazar process can't sign without your authentication)",
 			strconv.QuoteToASCII(name))

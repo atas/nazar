@@ -34,44 +34,42 @@ func (d *Daemon) awsCAObj(ca *certs.CA) control.AWSCA {
 		Created: i.Created, NotAfter: i.NotAfter, CertFile: d.awsCAFile(ca.Name), WhileLocked: ca.Access == platform.AccessAfterFirstUnlock}
 }
 
-// awsCACheckFirst opens the remedy for a CA nazar made: the check that
+// awsCACheckRest closes the check that opens the remedy for a CA nazar made: the check that
 // loses nothing comes first.
-const awsCACheckFirst = "first, if the login keychain is locked, unlock it, and if this nazar-agent is not the one you installed, reinstall that one, " +
-	"and run nazar aws list again (deleting the item destroys the CA for good, and AWS must then trust a new one); if the CA is still unreadable: "
+const awsCACheckRest = "and run nazar aws list again (deleting the item destroys the CA for good, and AWS must then trust a new one); if the CA is still unreadable: "
 
 // awsCARemedy is the spec 9 remedy for an aws-ca/<name> item.
-func awsCARemedy(name string) string {
+func (w vaultWords) awsCARemedy(name string) string {
 	account := aws.VaultPrefix + name
 	if !config.ValidAWSName(name) || !plainWord(account) {
 		if !plainWord(account) {
-			return removeItemByHand(account)
+			return w.removeItemByHand(account)
 		}
-		return deleteItem(account)
+		return w.deleteItem(account)
 	}
 	return fmt.Sprintf("%s%s, then nazar aws forget %s, then nazar aws ca create %s, then give the trust anchor its certificate (nazar aws ca show %s)",
-		awsCACheckFirst, deleteItem(account), name, name, name)
+		w.checkFirst(awsCACheckRest, account), w.deleteItem(account), name, name, name)
 }
 
 // awsCAFix is the fix for a CA store error: a record that reads but can't
 // be used is nazar's to delete (forget removes it); one the Keychain
 // refuses gets the spec 9 remedy.
-func awsCAFix(name string, err error) string {
+func (w vaultWords) awsCAFix(name string, err error) string {
 	if errors.Is(err, aws.ErrBroken) && config.ValidAWSName(name) {
 		return fmt.Sprintf("nazar aws forget %s deletes it (and the entry's config), then nazar aws ca create %s; the trust anchor must then hold the new CA", name, name)
 	}
-	return awsCARemedy(name)
+	return w.awsCARemedy(name)
 }
 
 // awsCAProblem turns a CA store error into a refusal with its remedy.
-func awsCAProblem(name string, err error) error {
+func (d *Daemon) awsCAProblem(name string, err error) error {
 	switch {
 	case errors.Is(err, aws.ErrNotFound):
 		return control.NewProblem(control.CodeError, "%s has no CA; nazar aws ca create %s makes one", name, name)
 	case errors.Is(err, aws.ErrBroken):
-		return control.NewProblem(control.CodeError, "the CA record of %s reads but can't be used; nothing was changed. To fix it: %s", name, awsCAFix(name, err))
+		return control.NewProblem(control.CodeError, "the CA record of %s reads but can't be used; nothing was changed. To fix it: %s", name, d.vault.awsCAFix(name, err))
 	case errors.Is(err, aws.ErrUnreadable):
-		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent: its Keychain item belongs to another signature of the agent, "+
-			"the login keychain is locked, or the item is not one nazar made; nothing was changed. To fix it: %s", name, awsCARemedy(name))
+		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent: %s; nothing was changed. To fix it: %s", name, d.vault.caUnreadable(), d.vault.awsCARemedy(name))
 	}
 	return err
 }
@@ -126,7 +124,7 @@ func (d *Daemon) awsCACreate(args map[string]string, peer *caller.Chain, out con
 			if i.Unreadable {
 				why = aws.ErrUnreadable
 			}
-			return awsCAProblem(i.Name, why)
+			return d.awsCAProblem(i.Name, why)
 		}
 		if i.Name != name {
 			return control.NewProblem(control.CodeError, "%s already has a CA, and names must differ in more than letter case", i.Name)
@@ -139,9 +137,9 @@ func (d *Daemon) awsCACreate(args map[string]string, peer *caller.Chain, out con
 		return out.Emit(d.awsSetupObj(name)) // set up already: nothing loosened, nothing asked
 	case hasCA && configured && e.Identity == s.Identity:
 		if caAccess == platform.AccessWhenUnlocked {
-			return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs only while the Mac is unlocked, for the CA's life: run this again with --only-when-unlocked, or nazar aws forget %s, then nazar aws ca create %s, for a new CA", name, name, name)
+			return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs only while %s is unlocked, for the CA's life: run this again with --only-when-unlocked, or nazar aws forget %s, then nazar aws ca create %s, for a new CA", name, d.traits.Machine, name, name)
 		}
-		return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs while the Mac is locked too, for the CA's life: run this again without --only-when-unlocked, or nazar aws forget %s, then nazar aws ca create %s --only-when-unlocked, for a new CA", name, name, name)
+		return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs while %s is locked too, for the CA's life: run this again without --only-when-unlocked, or nazar aws forget %s, then nazar aws ca create %s --only-when-unlocked, for a new CA", name, d.traits.Machine, name, name)
 	case hasCA || configured:
 		return control.NewProblem(control.CodeError, "%s is set up already (a CA or aws.%s in config.yaml); nazar aws list shows it, nazar aws forget %s removes it", name, name, name)
 	}
@@ -167,8 +165,8 @@ func (d *Daemon) awsCACreate(args map[string]string, peer *caller.Chain, out con
 		return err
 	}
 	lines := []string{
-		"The CA key is made in the Secure Enclave. AWS accepts every certificate it issues for any role whose trust policy names its trust anchor.",
-		accessLine(access),
+		"The CA key is made in " + d.traits.Chip + ". AWS accepts every certificate it issues for any role whose trust policy names its trust anchor.",
+		accessLine(access, d.traits),
 		"identity: CN=" + s.Identity.User,
 		"the program that runs credential_process (the AWS CLI, an SDK, terraform …) gets the credential when the rules allow whoever ran it",
 	}
@@ -220,7 +218,7 @@ func (d *Daemon) awsCACreate(args map[string]string, peer *caller.Chain, out con
 	ca, err := d.awsCA.Create(name, access)
 	if err != nil {
 		d.logOp(target, audit.Error, "set up aws entry: approved, but the CA could not be made: "+err.Error(), peer)
-		return awsCAProblem(name, err)
+		return d.awsCAProblem(name, err)
 	}
 	undo = append(undo, func() {
 		if err := d.awsCA.Delete(name); err != nil {
@@ -264,7 +262,7 @@ func (d *Daemon) awsCAShow(name string, out control.Emitter) error {
 	}
 	ca, err := d.awsCA.Get(name)
 	if err != nil {
-		return awsCAProblem(name, err)
+		return d.awsCAProblem(name, err)
 	}
 	o := d.awsCAObj(ca)
 	o.CertPEM = string(ca.CertPEM())
@@ -306,7 +304,7 @@ func (d *Daemon) awsObj(name string, c *config.Config) control.AWSEntry {
 		o.State = control.AWSStateAbsent
 	default:
 		o.State = control.AWSStateCAUnusable
-		o.CABroken, o.UnusableReason, o.Remedy = true, err.Error(), awsCAFix(name, err)
+		o.CABroken, o.UnusableReason, o.Remedy = true, err.Error(), d.vault.awsCAFix(name, err)
 	}
 	return o
 }
@@ -353,7 +351,7 @@ func (d *Daemon) awsForget(args map[string]string, peer *caller.Chain, out contr
 	hasCA := caErr == nil || errors.Is(caErr, aws.ErrBroken)
 	switch {
 	case errors.Is(caErr, aws.ErrUnreadable):
-		return awsCAProblem(name, caErr)
+		return d.awsCAProblem(name, caErr)
 	case !configured && !hasCA:
 		return control.NewProblem(control.CodeError, "no aws entry or CA named %s", name)
 	}
@@ -374,7 +372,7 @@ func (d *Daemon) awsForget(args map[string]string, peer *caller.Chain, out contr
 	defer cl.close()
 	var lines []string
 	if hasCA {
-		lines = append(lines, "The CA is destroyed in the Secure Enclave; this can't be undone. Sessions it gave stay valid until they end.")
+		lines = append(lines, d.deleted("The CA is destroyed in "+d.traits.Chip+"; this can't be undone.", "CA")+" Sessions it gave stay valid until they end.")
 	}
 	if configured {
 		lines = append(lines, "config.yaml loses aws."+name+".")
@@ -404,7 +402,7 @@ func (d *Daemon) awsForget(args map[string]string, peer *caller.Chain, out contr
 	if hasCA {
 		if err := d.awsCA.Delete(name); err != nil {
 			d.logOp(target, audit.Error, "forget aws entry: approved, but the CA could not be deleted: "+err.Error(), peer)
-			return awsCAProblem(name, err)
+			return d.awsCAProblem(name, err)
 		}
 		if err := os.Remove(d.awsCAFile(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			d.o.Logf("aws: removing %s: %v", d.awsCAFile(name), err)
@@ -464,7 +462,7 @@ func (d *Daemon) awsCAProblems() []control.VaultProblem {
 			why = aws.ErrUnreadable
 		}
 		p := control.VaultProblem{Item: aws.VaultPrefix + i.Name, Reason: i.Problem,
-			Effect: fmt.Sprintf("the AWS CLI and SDKs get no credential for aws entry %s", i.Name), Remedy: awsCAFix(i.Name, why)}
+			Effect: fmt.Sprintf("the AWS CLI and SDKs get no credential for aws entry %s", i.Name), Remedy: d.vault.awsCAFix(i.Name, why)}
 		if !config.ValidAWSName(i.Name) {
 			p.Item, p.Effect = awsDisplay(p.Item), "none: nazar never uses it as a CA; it is listed so that it can be removed"
 		}

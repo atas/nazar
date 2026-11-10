@@ -346,7 +346,7 @@ func (s *Stager) Approve(hash string, approve Approver) (bool, error) {
 	// without its config is harmless (the user approved that team, behind
 	// the gate). Pins already written stay if the config then fails to
 	// save; the change stays staged and the retry shows the same pins.
-	if err := recordPins(s.pins, p.Diff.Pins); err != nil {
+	if err := recordPins(s.pins, wordsOf(s.apps), p.Diff.Pins); err != nil {
 		return false, err
 	}
 	if err := s.apply(p.Config); err != nil {
@@ -381,7 +381,7 @@ func (s *Stager) ApplyAuthenticated(p Pending) error {
 	}
 	s.applyMu.Lock()
 	defer s.applyMu.Unlock()
-	if err := recordPins(s.pins, p.Diff.Pins); err != nil {
+	if err := recordPins(s.pins, wordsOf(s.apps), p.Diff.Pins); err != nil {
 		return err
 	}
 	if err := s.apply(p.Config); err != nil {

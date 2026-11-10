@@ -2,11 +2,12 @@
 
 *A watchful eye on every key.*
 
-Your keys and secrets, locked to your device by the Mac's Secure Enclave (Linux TPM coming).
-They can't be copied off it.
+Your keys and secrets, locked to your Mac by the Secure Enclave. They can't be copied off it.
+On Linux (preview) keys stay in the TPM and can't be copied off, but any program running as you
+can use them, and read every secret.
 
 - Restrict access per app
-- Approve with Touch ID or a dialog
+- Approve with Touch ID (your password on Linux) or a dialog
 - Git commit signing
 - API token vault for scripts and MCP servers
 - Credential plugin for kubectl and the AWS CLI
@@ -51,7 +52,34 @@ Then ask it:
 
 ### Linux
 
-Coming.
+A preview: tested in containers with a software TPM, not yet on real hardware. It is weaker than
+macOS: any program running as you can use your keys and read every secret without a prompt, and
+whoever holds the machine can use every key unless the disk is encrypted
+([threat model](docs/THREAT-MODEL.md#7-linux-preview)).
+
+A systemd desktop with a TPM 2.0, amd64 or arm64, and full-disk encryption:
+
+```bash
+brew install atas/tap/nazar-linux
+# or the release's install.sh, which prints the next two lines:
+# curl -fsSL https://github.com/atas/nazar/releases/latest/download/install.sh | sh
+
+sudo "$(command -v nazar)" install --system   # once; then log out and back in
+nazar install                                 # and after every upgrade; from Homebrew add --no-links
+```
+
+The `sudo` line runs a file you own as root: run it right after installing, from the file you just
+checked (install.sh checks it against `SHA256SUMS`), not from a line a program prints later.
+
+Set up as below, except:
+
+- `login` is your password through the system prompt (fingerprint where fprintd is set up)
+- `dialog` is a zenity or kdialog window
+- rules use `path:` and `app:` (`signed:` is macOS only)
+- `secret add` has no hidden prompt: pipe the value in
+- `nazar run` and `nazar ui` are not there
+
+[Everything that differs](docs/CLI.md#linux).
 
 ## Security note
 
@@ -93,7 +121,8 @@ git config --global commit.gpgsign true
 Secrets:
 
 ```bash
-nazar secret add API_TOKEN         # paste it at the hidden prompt; Touch ID
+nazar secret add API_TOKEN         # macOS: paste it at the hidden prompt; Touch ID
+printf '%s' "$API_TOKEN" | nazar secret add API_TOKEN    # or pipe it (the only way on Linux)
 nazar get API_TOKEN | sed 's/^/Authorization: Bearer /' | curl -H @- https://api.example.com
 ```
 
@@ -142,7 +171,8 @@ secrets:
         gate: login
 ```
 
-Changes that loosen access ask for Touch ID. `nazar config check` validates it.
+Changes that loosen access ask for Touch ID (your password on Linux). `nazar config check`
+validates it.
 
 ## More
 

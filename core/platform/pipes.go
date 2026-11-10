@@ -29,3 +29,23 @@ type Pipes interface {
 	// platform can't tell; callers refuse on false and on any error.
 	StdoutReadBy(writer, reader ProcessRef) (bool, error)
 }
+
+// StdoutThrough is the same question with one process between the two: a
+// shell that was told to run the writer and stayed as its parent instead
+// of exec'ing it (Debian's and Ubuntu's /bin/sh is dash, which does not
+// exec the command of `sh -c`; macOS's sh does, so there the question
+// never arises). The Go SDK and Terraform run credential_process that way
+// (aws design 3.4). A platform offers it when it can tell the shell's own
+// fds apart; one that does not leaves nazar-agent refusing such a chain,
+// as it always has.
+type StdoutThrough interface {
+	// StdoutReadByThrough is StdoutReadBy with via between writer and
+	// reader: fd 1 of writer is the write end of a pipe, and the pipe has
+	// exactly three references: that fd, fd 1 of via (the write end via
+	// inherited from reader and passed on, open for writing only, so via
+	// can never read what writer writes) and one fd of reader, open for
+	// reading, close-on-exec, which reader opened itself. Anything else
+	// (via holding a read end or a second fd, a fourth holder, via's fd 1
+	// being some other file) is false. Errors as StdoutReadBy.
+	StdoutReadByThrough(writer, via, reader ProcessRef) (bool, error)
+}

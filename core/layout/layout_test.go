@@ -75,6 +75,17 @@ func TestPrepare(t *testing.T) {
 	}
 }
 
+// The vault is a folder of ~/.nazar, next to run/ (Prepare does not make
+// it: the vault makes its own folder, with its own checks).
+func TestVaultDir(t *testing.T) {
+	if got := VaultDir("~"); got != "~/.nazar/vault" {
+		t.Errorf("VaultDir: %s", got)
+	}
+	if got, want := filepath.Dir(VaultDir("/home/u")), Root("/home/u"); got != want {
+		t.Errorf("VaultDir's parent: %s, want %s", got, want)
+	}
+}
+
 // A real-length home keeps the sockets within sun_path (macOS: 103 bytes, unixsock checks it).
 func TestSocketsFitSunPath(t *testing.T) {
 	home := "/Users/" + strings.Repeat("u", 32)
@@ -94,4 +105,18 @@ func fakeHome(t *testing.T) string {
 	}
 	t.Cleanup(func() { os.RemoveAll(home) })
 	return home
+}
+
+func TestAuditLog(t *testing.T) {
+	if got, want := AuditLog("/h"), "/h/.nazar/log/audit.log"; got != want {
+		t.Fatalf("%s, want %s", got, want)
+	}
+	// Prepare stays as it is on macOS: only the file sink makes this folder.
+	home := fakeHome(t)
+	if err := Prepare(home); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Lstat(filepath.Dir(AuditLog(home))); !os.IsNotExist(err) {
+		t.Fatalf("Prepare made the log folder: %v", err)
+	}
 }

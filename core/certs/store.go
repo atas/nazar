@@ -123,7 +123,7 @@ func (s *Store) Create(name string, access platform.Access) (ca *CA, err error) 
 	}
 	handle, pubRaw, err := s.p.CreateKey(platform.PurposeSign, platform.AuthNone, access)
 	if errors.Is(err, platform.ErrLocked) {
-		return nil, platform.Locked(k.tag + ": the Mac is locked; a CA that signs only while it's unlocked can't be made now")
+		return nil, platform.Locked(k.tag + ": " + platform.TraitsOf(s.p).Machine + " is locked; a CA that signs only while it's unlocked can't be made now")
 	}
 	if err != nil {
 		return nil, err
@@ -135,7 +135,7 @@ func (s *Store) Create(name string, access platform.Access) (ca *CA, err error) 
 	}()
 	pub, err := ecdsa.ParseUncompressedPublicKey(elliptic.P256(), pubRaw)
 	if err != nil {
-		return nil, fmt.Errorf("%s: the enclave returned an unusable public key: %w", k.tag, err)
+		return nil, fmt.Errorf("%s: the %s returned an unusable public key: %w", k.tag, platform.TraitsOf(s.p).KeyChip(), err)
 	}
 	now := s.now().UTC()
 	serial, err := randomSerial()

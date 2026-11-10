@@ -73,15 +73,14 @@ func writePublic(path string, data []byte) error {
 }
 
 // caProblem turns a CA store error into a refusal with the spec 9 remedy.
-func caProblem(name string, err error) error {
+func (d *Daemon) caProblem(name string, err error) error {
 	switch {
 	case errors.Is(err, k8s.ErrNotFound):
 		return control.NewProblem(control.CodeError, "%s has no CA; nazar k8s ca create %s makes one", name, name)
 	case errors.Is(err, k8s.ErrBroken):
-		return control.NewProblem(control.CodeError, "the CA record of %s reads but can't be used; nothing was changed. To fix it: %s", name, k8sCAFix(name, err))
+		return control.NewProblem(control.CodeError, "the CA record of %s reads but can't be used; nothing was changed. To fix it: %s", name, d.vault.k8sCAFix(name, err))
 	case errors.Is(err, k8s.ErrUnreadable):
-		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent: its Keychain item belongs to another signature of the agent, "+
-			"the login keychain is locked, or the item is not one nazar made; nothing was changed. To fix it: %s", name, k8sCARemedy(name))
+		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent: %s; nothing was changed. To fix it: %s", name, d.vault.caUnreadable(), d.vault.k8sCARemedy(name))
 	}
 	return err
 }
@@ -89,11 +88,11 @@ func caProblem(name string, err error) error {
 // k8sCAFix is the fix for a CA store error: a
 // record that reads but can't be used is nazar's to delete, so forget
 // removes it; one the Keychain refuses gets the spec 9 remedy.
-func k8sCAFix(name string, err error) string {
+func (w vaultWords) k8sCAFix(name string, err error) string {
 	if errors.Is(err, k8s.ErrBroken) && config.ValidK8sContextName(name) {
 		return fmt.Sprintf("nazar k8s forget %s deletes it (and the context's config entry), then nazar k8s ca create %s; the cluster must then trust the new CA", name, name)
 	}
-	return k8sCARemedy(name)
+	return w.k8sCARemedy(name)
 }
 
 // k8sSetupSpec reads and checks ca create's arguments (k8s
@@ -182,7 +181,7 @@ func (d *Daemon) k8sCACreate(args map[string]string, peer *caller.Chain, out con
 			if i.Unreadable {
 				why = k8s.ErrUnreadable
 			}
-			return caProblem(i.Name, why)
+			return d.caProblem(i.Name, why)
 		}
 		if i.Name != name {
 			return control.NewProblem(control.CodeError, "%s already has a CA, and names must differ in more than letter case", i.Name)
@@ -200,9 +199,9 @@ func (d *Daemon) k8sCACreate(args map[string]string, peer *caller.Chain, out con
 		// for the CA's life: refused, never answered with a CA that is
 		// not what was asked for.
 		if caAccess == platform.AccessWhenUnlocked {
-			return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs only while the Mac is unlocked, for the CA's life: run this again with --only-when-unlocked to finish its setup, or nazar k8s forget %s, then nazar k8s ca create %s, for a new CA", name, name, name)
+			return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs only while %s is unlocked, for the CA's life: run this again with --only-when-unlocked to finish its setup, or nazar k8s forget %s, then nazar k8s ca create %s, for a new CA", name, d.traits.Machine, name, name)
 		}
-		return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs while the Mac is locked too, for the CA's life: run this again without --only-when-unlocked to finish its setup, or nazar k8s forget %s, then nazar k8s ca create %s --only-when-unlocked, for a new CA", name, name, name)
+		return control.NewProblem(control.CodeError, "%s is set up already, and its CA signs while %s is locked too, for the CA's life: run this again without --only-when-unlocked to finish its setup, or nazar k8s forget %s, then nazar k8s ca create %s --only-when-unlocked, for a new CA", name, d.traits.Machine, name, name)
 	case hasCA || configured:
 		return control.NewProblem(control.CodeError, "%s is set up already (a CA or k8s.contexts.%s in config.yaml); nazar k8s list shows it, nazar k8s forget %s removes it", name, name, name)
 	}
@@ -228,8 +227,8 @@ func (d *Daemon) k8sCACreate(args map[string]string, peer *caller.Chain, out con
 		return err
 	}
 	lines := []string{
-		"The CA key is made in the Secure Enclave. A cluster that trusts its certificate accepts every certificate nazar mints for " + name + ".",
-		accessLine(access),
+		"The CA key is made in " + d.traits.Chip + ". A cluster that trusts its certificate accepts every certificate nazar mints for " + name + ".",
+		accessLine(access, d.traits),
 		"identity: CN=" + s.Identity.User + " (no groups: a ClusterRoleBinding gives it its role)",
 		"server: " + s.Cluster.Server,
 		// Security review: the whole fingerprint, as `openssl x509
@@ -295,7 +294,7 @@ func (d *Daemon) k8sCACreate(args map[string]string, peer *caller.Chain, out con
 	ca, err := d.k8sCA.Create(name, access)
 	if err != nil {
 		d.logOp(target, audit.Error, "set up context: approved, but the CA could not be made: "+err.Error(), peer)
-		return caProblem(name, err)
+		return d.caProblem(name, err)
 	}
 	undo = append(undo, func() {
 		if err := d.k8sCA.Delete(name); err != nil {
@@ -352,7 +351,7 @@ func (d *Daemon) k8sSetupObj(name string) control.K8sContext {
 func (d *Daemon) k8sCAShow(name string, out control.Emitter) error {
 	ca, err := d.k8sCA.Get(name)
 	if err != nil {
-		return caProblem(name, err)
+		return d.caProblem(name, err)
 	}
 	o := d.caObj(ca)
 	o.CertPEM = string(ca.CertPEM())
@@ -393,7 +392,7 @@ func (d *Daemon) k8sObj(name string, c *config.Config) control.K8sContext {
 		o.State = control.K8sStateAbsent
 	default:
 		o.State = control.K8sStateCAUnusable
-		o.CABroken, o.UnusableReason, o.Remedy = true, err.Error(), k8sCAFix(name, err)
+		o.CABroken, o.UnusableReason, o.Remedy = true, err.Error(), d.vault.k8sCAFix(name, err)
 	}
 	return o
 }
@@ -445,7 +444,7 @@ func (d *Daemon) k8sForget(args map[string]string, peer *caller.Chain, out contr
 	hasCA := caErr == nil || errors.Is(caErr, k8s.ErrBroken)
 	switch {
 	case errors.Is(caErr, k8s.ErrUnreadable):
-		return caProblem(name, caErr)
+		return d.caProblem(name, caErr)
 	case !configured && !hasCA:
 		return control.NewProblem(control.CodeError, "no k8s context or CA named %s", name)
 	}
@@ -466,7 +465,7 @@ func (d *Daemon) k8sForget(args map[string]string, peer *caller.Chain, out contr
 	defer cl.close() // any return before cl.end(true) is an approval that applied nothing
 	var lines []string
 	if hasCA {
-		lines = append(lines, "The CA is destroyed in the Secure Enclave; this can't be undone. Certificates it minted stay valid until they end.")
+		lines = append(lines, d.deleted("The CA is destroyed in "+d.traits.Chip+"; this can't be undone.", "CA")+" Certificates it minted stay valid until they end.")
 	}
 	if configured {
 		lines = append(lines, "config.yaml loses k8s.contexts."+name+".")
@@ -500,7 +499,7 @@ func (d *Daemon) k8sForget(args map[string]string, peer *caller.Chain, out contr
 	if hasCA {
 		if err := d.k8sCA.Delete(name); err != nil {
 			d.logOp(target, audit.Error, "forget context: approved, but the CA could not be deleted: "+err.Error(), peer)
-			return caProblem(name, err)
+			return d.caProblem(name, err)
 		}
 		if err := os.Remove(d.caFile(name)); err != nil && !errors.Is(err, os.ErrNotExist) {
 			d.o.Logf("k8s: removing %s: %v", d.caFile(name), err)

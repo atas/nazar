@@ -84,7 +84,7 @@ func (ca *CA) Issue(p platform.Platform, spec LeafSpec, now time.Time, ref platf
 	if err != nil {
 		err = unwrapPlatform(err)
 		if errors.Is(err, platform.ErrLocked) && ca.Access == platform.AccessWhenUnlocked {
-			return Leaf{}, platform.Locked(fmt.Sprintf("%s: the Mac is locked; the CA of %s signs only while it's unlocked", k.tag, ca.Name))
+			return Leaf{}, platform.Locked(fmt.Sprintf("%s: %s is locked; the CA of %s signs only while it's unlocked", k.tag, platform.TraitsOf(p).Machine, ca.Name))
 		}
 		return Leaf{}, err
 	}

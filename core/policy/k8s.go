@@ -58,7 +58,7 @@ func (e *Engine) EvaluateK8s(name string, c *caller.Chain, got *cluster.Info) Ou
 	}
 	// Check 1: chain[1] is a live, full record with an identity an
 	// approval can be remembered under.
-	if len(c.Procs) < 2 || !identified(c.Procs[1]) {
+	if len(c.Procs) < 2 || !e.identified(c.Procs[1]) {
 		return block(ReasonK8sCaller)
 	}
 	client := c.Procs[1]
@@ -90,8 +90,18 @@ func (e *Engine) EvaluateK8s(name string, c *caller.Chain, got *cluster.Info) Ou
 // receive a credential (check 1 of k8s and aws): a full record (not PID-only) whose code signature
 // verified and gives it an identity (a team, or a cdhash for ad-hoc code
 // such as Homebrew's), which is the receiver of the approval (match.Identity).
-func identified(p platform.ProcessInfo) bool {
-	return !p.Ref.IsPIDOnly() && !p.Ref.IsZero() && p.Code.Signed && (p.Code.Team() != "" || len(p.Code.CDHash) > 0)
+// Without code signing (NoCodeSigning) the identity is the file and its hash.
+func (e *Engine) identified(p platform.ProcessInfo) bool {
+	if p.Ref.IsPIDOnly() || p.Ref.IsZero() {
+		return false
+	}
+	if e.NoCodeSigning {
+		// No signature exists to verify: the file and its hash are the
+		// identity (match.Identity gives "path:<path>#<hash>"), and a
+		// record missing either has none.
+		return p.Path != "" && len(p.Code.CDHash) > 0
+	}
+	return p.Code.Signed && (p.Code.Team() != "" || len(p.Code.CDHash) > 0)
 }
 
 // k8sRuleID binds a rule's (or the fallback's) id to what the context

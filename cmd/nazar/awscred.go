@@ -14,7 +14,8 @@ import (
 // credential_process (aws design 3). It is a pipe, as k8s credential is:
 // no --json, no config file, no environment variable read at all, the
 // socket from the user database's home, the agent checked by its
-// signature (the nazartest build's test socket only). One write of the
+// signature, or on Linux by its hash against the record in that same home
+// (the nazartest build's test socket only). One write of the
 // credential_process JSON to stdout, or one line to stderr and the exit
 // code (6.3).
 func (a *app) awsCredential(args []string) int {

@@ -33,16 +33,25 @@ func (a *app) defaultVerifier() control.PeerVerifier {
 		}
 		return control.SameUserVerifier{}
 	}
-	return a.agentVerifier()
+	return a.agentVerifier(a.home())
 }
 
 // agentVerifier is the signature check of the control socket's peer
 // against agentRequirement, with no test override: what k8s credential
-// uses whatever its environment says.
-func (a *app) agentVerifier() control.PeerVerifier {
+// uses whatever its environment says. On Linux (a.linux) there is no
+// signature to check: after the same same-user check, the peer must hash
+// to the nazar-agent `nazar install` recorded in home, and this CLI to the
+// nazar it recorded there (checkLinuxAgent, core/peertrust). home is the
+// caller's to choose, because the record is what the check trusts: k8s
+// credential and aws credential pass the user database's, never $HOME,
+// which their environment controls. macOS reads no file and ignores it.
+func (a *app) agentVerifier(home string) control.PeerVerifier {
 	return control.VerifierFunc(func(c *net.UnixConn) error {
 		if err := unixsock.RequireSameUser(c); err != nil {
 			return err
+		}
+		if a.linux {
+			return unixsock.WithFD(c, func(fd int) error { return checkLinuxAgent(fd, home) })
 		}
 		req, err := a.agentRequirement()
 		if err != nil {

@@ -24,12 +24,14 @@ import (
 )
 
 // The programs the client-side checks run, by absolute path, never via
-// $PATH. git is run under the developer directory xcode-select names:
-// /usr/bin/git is Apple's shim, which puts the "install the command line
-// developer tools" dialog on the screen when none is installed.
+// $PATH. On macOS git is run under the developer directory xcode-select
+// names: /usr/bin/git is Apple's shim, which puts the "install the command
+// line developer tools" dialog on the screen when none is installed. On
+// Linux /usr/bin/git is git.
 const (
 	sshExe         = "/usr/bin/ssh"
 	xcodeSelectExe = "/usr/bin/xcode-select"
+	linuxGitExe    = "/usr/bin/git"
 )
 
 // setupTimeout bounds all the client-side checks of one `nazar status`: a
@@ -401,11 +403,10 @@ func (s *setup) oldFolder() {
 // no developer tools are installed, or when git has none of the three
 // settings (--get-regexp exits 1).
 func (s *setup) git() {
-	dev, err := s.a.output(s.ctx, xcodeSelectExe, "-p")
-	if err != nil || strings.TrimSpace(string(dev)) == "" {
+	git, ok := s.gitExe()
+	if !ok {
 		return
 	}
-	git := filepath.Join(strings.TrimSpace(string(dev)), "usr", "bin", "git")
 	out, err := s.a.output(s.ctx, git, gitConfigArgs...)
 	if err != nil {
 		return
@@ -438,6 +439,18 @@ func (s *setup) git() {
 	}
 }
 
+// gitExe is the git to ask; false on a Mac with no developer tools.
+func (s *setup) gitExe() (string, bool) {
+	if s.a.linux {
+		return linuxGitExe, true
+	}
+	dev, err := s.a.output(s.ctx, xcodeSelectExe, "-p")
+	if err != nil || strings.TrimSpace(string(dev)) == "" {
+		return "", false
+	}
+	return filepath.Join(strings.TrimSpace(string(dev)), "usr", "bin", "git"), true
+}
+
 // programWords says what is wrong with gpg.ssh.program.
 func programWords(p string) string {
 	switch {
@@ -455,10 +468,17 @@ func programWords(p string) string {
 // cask links nazar-sign-git. A variable so tests never read this Mac's.
 var brewBinDirs = []string{"/opt/homebrew/bin", "/usr/local/bin"}
 
+// linuxBrewBinDirs is Homebrew's link folder on Linux.
+var linuxBrewBinDirs = []string{"/home/linuxbrew/.linuxbrew/bin"}
+
 // programFix is the setting to make: the nazar-sign-git link install made,
 // in the folder this CLI links into or Homebrew's; else install first.
 func (s *setup) programFix() string {
-	for _, dir := range append([]string{s.a.defaultBinDir()}, brewBinDirs...) {
+	brew := brewBinDirs
+	if s.a.linux {
+		brew = linuxBrewBinDirs
+	}
+	for _, dir := range append([]string{s.a.defaultBinDir()}, brew...) {
 		if l := filepath.Join(dir, signGitName); isExecutable(l) {
 			return "set it with `git config --global gpg.ssh.program " + l + "`"
 		}

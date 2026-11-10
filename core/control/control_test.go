@@ -1430,3 +1430,26 @@ func TestNoGoroutineLeakOnCancelledFollow(t *testing.T) {
 		t.Fatalf("%d handlers still running after their clients left", n)
 	}
 }
+
+// A verifier's refusal about the CLI itself reaches the user as it is: the
+// peer passed, so nothing says it is not nazar-agent, and nothing is sent.
+func TestVerifierSelfErrorIsNotAboutThePeer(t *testing.T) {
+	var n atomic.Int32
+	ts := serve(t, &stubHandler{fn: func(context.Context, Request, Emitter) { n.Add(1) }})
+	c := &Client{Socket: ts.path, Verifier: VerifierFunc(func(*net.UnixConn) error {
+		return &SelfError{Err: errors.New("this CLI is out of date")}
+	})}
+	err := c.Do(context.Background(), NewRequest(CmdStatus, nil), nil)
+	p := AsProblem(err)
+	if p == nil || p.Code != CodeError || p.Message != "this CLI is out of date" {
+		t.Fatalf("problem %+v", p)
+	}
+	if n.Load() != 0 {
+		t.Fatal("a request was sent after the verifier refused")
+	}
+	// Any other refusal still names the peer.
+	c.Verifier = VerifierFunc(func(*net.UnixConn) error { return errors.New("bad peer") })
+	if p := AsProblem(c.Do(context.Background(), NewRequest(CmdStatus, nil), nil)); p == nil || !strings.Contains(p.Message, "is not nazar-agent: bad peer") {
+		t.Fatalf("problem %+v", p)
+	}
+}

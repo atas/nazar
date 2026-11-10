@@ -12,6 +12,9 @@ means editing the config, and that edit itself needs Touch ID / Watch / password
 Later phases turn the same core into a broker for API tokens (`secrets`), Kubernetes
 credentials (`k8s`) and AWS session credentials through IAM Roles Anywhere (`aws`).
 
+This guide is written for macOS. For Linux, a preview with keys in the TPM, see
+[Linux (preview)](#linux-preview).
+
 > **Status: under development, in daily use by its author.** nazar is two packages: **`nazar`**,
 > the product (the `nazar-agent` background service with the Secure Enclave keys, the Touch ID /
 > password and Allow/Deny prompts and the LaunchAgent, plus the `nazar` CLI), and the optional
@@ -33,6 +36,7 @@ credentials (`k8s`) and AWS session credentials through IAM Roles Anywhere (`aws
 - [Quick start](#quick-start)
 - [Secrets: the GitHub token](#secrets-the-github-token)
 - [Secrets: an MCP server's key (Brave Search)](#secrets-an-mcp-servers-key-brave-search)
+- [Linux (preview)](#linux-preview)
 - [Comparison](#comparison)
 - [Threat model](#threat-model)
 - [Project status](#project-status)
@@ -252,7 +256,7 @@ in the full version).
 
 ## Quick start
 
-Requires an Apple silicon Mac on macOS 26 or later.
+Requires an Apple silicon Mac on macOS 26 or later. On Linux, see [Linux (preview)](#linux-preview).
 
 ```bash
 # 1a. With Homebrew (pre-built, Developer ID-signed and notarized). The `nazar` cask installs
@@ -490,7 +494,7 @@ git -C ~/projects/<a GitHub repo> fetch
 #    value was in plain text in ~/.bash_profile, in backups and in shell history. Then store the
 #    new one (two Touch IDs; the config entry and its rules are kept):
 nazar secret rm GITHUB_PERSONAL_ACCESS_TOKEN
-nazar secret add GITHUB_PERSONAL_ACCESS_TOKEN         # paste the new token at the hidden prompt
+nazar secret add GITHUB_PERSONAL_ACCESS_TOKEN         # macOS: paste the new token at the hidden prompt
 ```
 
 `git-credential-nazar` is a link to the CLI that `nazar install` (or the cask) puts next to
@@ -519,14 +523,16 @@ they would any variable.)
 
 > **Status (M10):** built, and tested end to end with real `npx` and the real loaders: on the Mac
 > on nazar-agent's own process seams with the CLI and loaders of the built nazar-agent.app
-> (`make integration-run`), and on Linux with a test platform (no Linux agent ships). A release
-> with it is next. With an older nazar-agent `nazar run` refuses, asks nothing and runs nothing,
+> (`make integration-run`), and on Linux with a test platform. `nazar run` is macOS only: on Linux
+> it refuses and runs nothing, so this section does not apply there. A release with it is next.
+> With an older nazar-agent `nazar run` refuses, asks nothing and runs nothing,
 > so **keep the `env` block on the Mac until you have installed that release** (step 4 would stop
 > the server starting).
 
 ```bash
 # 1. Store it (one Touch ID). Copy the value from the "brave-search" entry's env block in
-#    ~/.claude.json and paste it at the hidden prompt. config.yaml gets an entry for it:
+#    ~/.claude.json and paste it at the hidden prompt (this section is macOS only).
+#    config.yaml gets an entry for it:
 #    blocked, plus a login rule for the terminal app you typed this in (replaced in step 3).
 nazar secret add BRAVE_API_KEY
 
@@ -604,6 +610,22 @@ not yet.
   Claude Code run, whoever in the run starts it; `scope: use` asks every time.
 - Pins are taken per request, not recorded: a later version records them and shows what changed.
 
+## Linux (preview)
+
+The same `nazar` CLI and agent run on Linux desktops (systemd, amd64 and arm64), with keys in the TPM,
+`login` as your password at the system's polkit prompt (a fingerprint where fprintd is set up) and
+`dialog` as a zenity or kdialog window. It is a preview: tested in containers with a software TPM, not
+yet on real hardware.
+
+It is weaker than macOS. Any program running as you can use your keys and read every secret without
+a prompt, so nazar on Linux keeps keys on the machine and puts rules on the tools that ask, but does
+not stop hostile code running as you; and whoever holds the machine can use every key unless the
+disk is encrypted. Rules use `app:` and `path:` (`signed:` is macOS only), an `app:` pin breaks on every
+update of the app, `secret add` has no hidden prompt, and `nazar run` and `nazar ui` are not there.
+
+Install, upgrade and every difference: [docs/CLI.md, Linux](CLI.md#linux). Where it is weaker:
+[threat model, section 7](THREAT-MODEL.md#7-linux-preview).
+
 ## Comparison
 
 | | Keychain + `ssh-agent` | 1Password SSH agent | Secretive | **nazar** |
@@ -630,7 +652,8 @@ and lives at <https://github.com/maxgoedjen/secretive>; its open issues
 
 ## Threat model
 
-Short version; the full one is in [docs/THREAT-MODEL.md](THREAT-MODEL.md). To report a flaw, see [SECURITY.md](../SECURITY.md).
+Short version, for macOS; the full one is in [docs/THREAT-MODEL.md](THREAT-MODEL.md), and Linux is
+[its section 7](THREAT-MODEL.md#7-linux-preview). To report a flaw, see [SECURITY.md](../SECURITY.md).
 
 **nazar protects against**
 
@@ -724,6 +747,7 @@ Short version; the full one is in [docs/THREAT-MODEL.md](THREAT-MODEL.md). To re
 | Phase 2 | `secrets`: API tokens encrypted to a Secure Enclave key, delivered by credential helper, named pipe, late env var or stdout | In progress (M8: storage, the `secrets:` section of config.yaml, `nazar secret add/list/rm`, git's credential helper, `nazar get`; M10: `nazar run`, late-env for MCP servers, built and tested on Linux, the macOS seams next; M11: `nazar secret rule add/set/remove` and the Secrets tab in Nazar UI.app) |
 | Phase 3 | `k8s`: kubectl exec credential plugin gated on who called kubectl | In progress (M12: `ca-cert`: a Secure Enclave CA per context mints 15-minute client certificates; `nazar k8s ca`, `list`, `forget`; M13: `nazar k8s rule add/set/remove` and the Kubernetes tab in Nazar UI.app; one guided `nazar k8s ca create` sets a context up without the kubeconfig's credential; see [docs/CLI.md](CLI.md#kubernetes)) |
 | Phase 3 · AWS | `aws`: `credential_process` for the AWS CLI and SDKs, sessions minted through IAM Roles Anywhere with a certificate from a Secure Enclave CA per entry | In progress (`nazar aws ca create`, `list`, `rule add/set/remove`, `forget`, `credential`; no Nazar UI.app tab yet; see [docs/CLI.md](CLI.md#aws)) |
+| Linux | The same CLI and agent on the TPM, polkit, zenity or kdialog and `/proc` (`core/platform/linux`, `cmd/nazar-agent`), tested in containers with a software TPM on every PR | Preview: not yet run on real hardware; see [Linux (preview)](#linux-preview) |
 
 ## Development
 
@@ -731,12 +755,16 @@ Short version; the full one is in [docs/THREAT-MODEL.md](THREAT-MODEL.md). To re
 |---|---|
 | `core/` | Go core: config, caller chains, policy, approvals, audit, SSH agent, control socket, secrets storage (`core/secrets`) |
 | `core/platform/` | The platform interface (Secure Enclave, prompts, process info) and a fake for tests |
+| `core/platform/linux/` | The Linux platform: TPM keys, a file vault, polkit, the dialog program, logind, `/proc`, desktop apps |
 | `cmd/nazar/` | The `nazar` CLI (also `install` / `uninstall`) |
+| `cmd/nazar-agent/` | `nazar-agent` on Linux (on macOS it is `bridge/` and `macos/`) |
 | `loaders/` | The Node and Python loaders `nazar run` gives a program (`node --test loaders/node/env_test.cjs`, `python3 -m unittest discover -s loaders/python -p '*_test.py'`) |
 | `bridge/` | The Go core as a C archive for nazar-agent, and the conformance host's archive |
 | `macos/` | Swift: the platform layer (Secure Enclave, Keychain, prompts, callers), nazar-agent.app, Nazar UI.app (`NazarUI`, `NazarUIApp`), test hosts |
 | `scripts/` | Bundle checks (`check-agent.sh`, `check-ui.sh`) and the release tooling (`release.sh`, `release-sign.sh`; [RELEASING.md](RELEASING.md)) |
-| `packaging/homebrew/` | The two cask templates (`nazar`, `nazar-ui`) the release renders |
+| `packaging/homebrew/` | The two cask templates (`nazar`, `nazar-ui`) and the `nazar-linux` formula template the release renders |
+| `packaging/linux/` | The polkit action and the udev rule `nazar install --system` installs |
+| `test/linux/` | The Linux test image (swtpm, D-Bus, polkit) and the end-to-end test |
 | `internal/cmd/nazar-testd/` | The core on the fake platform, for integration tests only |
 | `test/integration/` | Tests that drive real `ssh`, `sshd` and `git` |
 
@@ -756,6 +784,8 @@ make release      # a person, with the Developer ID certificate: sign, notarize,
                   # the casks (docs/RELEASING.md); NAZAR_SIGN_ID=- DRY_RUN=1 runs it ad hoc, no notary
 make release-tap TAP=../homebrew-tap   # the signed release's casks into a tap checkout, not committed
 make check-launchd      # opt-in: install/uninstall against launchd under a test label
+make linux              # the whole Linux suite in a container (Docker): software TPM, D-Bus, polkit
+make linux-run CMD='make test'   # one command in that container
 make fuzz         # short fuzz runs of the untrusted-input parsers (FUZZTIME=10m for a longer hunt)
 ```
 

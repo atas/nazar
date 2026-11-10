@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"testing"
 	"time"
@@ -45,12 +46,9 @@ func TestK8sCommandsAsTheDocsSay(t *testing.T) {
 	kubeconfig := func() string { b, _ := os.ReadFile(kc); return string(b) }
 	// kubectl on the world's PATH, for the run at the end; set up needs
 	// none (no program is pinned, k8s design 2.1).
-	kubectl := ""
-	for _, d := range filepath.SplitList(strings.TrimPrefix(w.env()[1], "PATH=")) {
-		if fi, err := os.Stat(filepath.Join(d, "kubectl")); err == nil && fi.Mode().IsRegular() {
-			kubectl = filepath.Join(d, "kubectl")
-			break
-		}
+	kubectl := findKubectl(strings.TrimPrefix(w.env()[1], "PATH="))
+	if kubectl == "" && noKubectlFails(runtime.GOOS) {
+		t.Fatalf("no kubectl on the world's PATH (%s), and the test image has one", w.env()[1])
 	}
 	run := func(want int, args ...string) string {
 		t.Helper()

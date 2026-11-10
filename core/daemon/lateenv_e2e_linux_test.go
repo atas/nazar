@@ -3,6 +3,7 @@ package daemon
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -72,7 +73,9 @@ func newE2EWorld(t *testing.T, cfg func(w *e2eWorld) string) *e2eWorld {
 	t.Cleanup(func() { os.RemoveAll(tmp) })
 	tmp, _ = filepath.EvalSymlinks(tmp)
 	w := &e2eWorld{tmp: tmp, cli: filepath.Join(tmp, "nazar"), rhome: filepath.Join(tmp, "home")}
-	build := exec.Command("go", "build", "-o", w.cli, "./cmd/nazar")
+	// The nazartest build: the shipped CLI refuses nazar run on Linux
+	// (TestShippedCLIRefusesRun), and NAZAR_TEST_RUN_ON_LINUX lifts that here.
+	build := exec.Command("go", "build", "-tags", "nazartest", "-o", w.cli, "./cmd/nazar")
 	build.Dir = repo
 	if out, err := build.CombinedOutput(); err != nil {
 		t.Fatalf("build: %v\n%s", err, out)
@@ -146,7 +149,7 @@ func (w *e2eWorld) run(t *testing.T, argv ...string) *e2eRun {
 	r.cmd = exec.Command(w.cli, append([]string{"run", "--secret", "BRAVE_API_KEY", "--"}, argv...)...)
 	// The caller's environment, hostile where it can be: none of it may
 	// reach the receiver but E2E_REPORT (envAllow).
-	r.cmd.Env = []string{"HOME=" + w.home, "PATH=" + os.Getenv("PATH"), "NAZAR_TEST_PEER=same-user",
+	r.cmd.Env = []string{"HOME=" + w.home, "PATH=" + os.Getenv("PATH"), "NAZAR_TEST_PEER=same-user", "NAZAR_TEST_RUN_ON_LINUX=1",
 		"NAZAR_CONTROL_SOCKET=" + layout.ControlSocket(w.home), "E2E_REPORT=" + r.report,
 		"NODE_OPTIONS=--require /nonexistent/evil.cjs", "PYTHONPATH=/nonexistent", "npm_config_registry=http://127.0.0.1:1/"}
 	r.cmd.Dir = w.tmp
@@ -266,6 +269,31 @@ func (w *e2eWorld) audited() (approved, refused int) {
 		}
 	}
 	return approved, refused
+}
+
+// The CLI as it ships refuses nazar run on Linux, before any request, also
+// with the variable that lifts the refusal in the nazartest build.
+func TestShippedCLIRefusesRun(t *testing.T) {
+	if testing.Short() {
+		t.Skip("end to end: builds the CLI")
+	}
+	_, here, _, _ := runtime.Caller(0)
+	cli := filepath.Join(t.TempDir(), "nazar")
+	build := exec.Command("go", "build", "-o", cli, "./cmd/nazar")
+	build.Dir = filepath.Join(filepath.Dir(here), "..", "..")
+	if out, err := build.CombinedOutput(); err != nil {
+		t.Fatalf("build: %v\n%s", err, out)
+	}
+	run := exec.Command(cli, "run", "--secret", "API", "--", "/bin/true")
+	run.Env = []string{"HOME=" + t.TempDir(), "PATH=" + os.Getenv("PATH"), "NAZAR_TEST_RUN_ON_LINUX=1"}
+	out, err := run.CombinedOutput()
+	var exit *exec.ExitError
+	if !errors.As(err, &exit) || exit.ExitCode() != 1 {
+		t.Fatalf("err %v, want exit 1:\n%s", err, out)
+	}
+	if want := "nazar run is not available on Linux yet"; !strings.Contains(string(out), want) {
+		t.Fatalf("output lacks %q:\n%s", want, out)
+	}
 }
 
 func TestRunEndToEndThroughRealNpx(t *testing.T) {

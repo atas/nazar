@@ -33,6 +33,17 @@ type Evaluator struct {
 	// names, the way nazar run resolves a request (through the active
 	// config's defaults.trustedPath). nil: command: matches nothing.
 	Command func(argv0 string) (string, error)
+	// PinWord is what an app: pin records, for the notes: "" means "team"
+	// (macOS); Linux pins the executable's hash ("executable hash").
+	PinWord string
+}
+
+// pinWord is PinWord, "team" when unset.
+func (e *Evaluator) pinWord() string {
+	if e.PinWord == "" {
+		return "team"
+	}
+	return e.PinWord
 }
 
 func (e *Evaluator) note(format string, args ...any) {
@@ -240,10 +251,16 @@ func (e *Evaluator) app(m config.Matcher, c *caller.Chain) bool {
 	}
 	pinned, ok := e.Trust.PinnedTeam(m.ID)
 	if !ok {
-		e.note("app %s has no pinned team, so app: %s matches nothing; approve a config change that pins it or run `nazar trust --app %s`", m.ID, m.ID, m.ID)
+		e.note("app %s has no pinned %s, so app: %s matches nothing; approve a config change that pins it or run `nazar trust --app %s`", m.ID, e.pinWord(), m.ID, m.ID)
 		return false
 	}
 	if pinned != team {
+		if e.PinWord != "" {
+			// A package upgrade replaces the executable: the old hash stays
+			// pinned until the user, knowing why, pins the new one.
+			e.note("app %s has %s %s but %s is pinned; not matching; run nazar trust --app %s once you know why it changed", m.ID, e.PinWord, team, pinned, m.ID)
+			return false
+		}
 		e.note("app %s has team %s but %s is pinned; not matching", m.ID, team, pinned)
 		return false
 	}

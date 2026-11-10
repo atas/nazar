@@ -5,6 +5,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"strconv"
 	"strings"
 
@@ -54,7 +55,7 @@ func (d *Daemon) refuseNotCLI(req control.Request, peer *caller.Chain) error {
 	if peer != nil {
 		switch req.Command {
 		case control.CmdSecretHelper:
-			recv = gitReceiver(peer)
+			recv = d.gitReceiver(peer)
 		case control.CmdSecretRun: // nothing was resolved: no receiver
 		default:
 			recv = peer.Parent()
@@ -88,7 +89,7 @@ func (d *Daemon) secretObj(name string, info *secrets.Info, c *config.Config) co
 		s.UserPresence = info.Auth == platform.AuthUserPresence
 		s.WhileLocked = !info.Broken && info.Access == platform.AccessAfterFirstUnlock
 		if info.Broken {
-			s.Broken, s.UnusableReason, s.Remedy = true, secretReason(*info), secretRemedy(name)
+			s.Broken, s.UnusableReason, s.Remedy = true, d.vault.secretReason(*info), d.vault.secretRemedy(name)
 		} else {
 			created := info.Created
 			s.Created = &created
@@ -249,7 +250,7 @@ func (d *Daemon) secretAdd(args map[string]string, peer *caller.Chain, out contr
 	}
 	_, hasEntry := active.Secrets[name]
 	var p *configPreview
-	lines := []string{deliverLine(active, name), accessLine(access)}
+	lines := []string{deliverLine(active, name), accessLine(access, d.traits)}
 	if hasEntry {
 		lines = append(lines, "for its entry in config.yaml (secrets."+name+"; its rules are kept)")
 	} else {
@@ -355,8 +356,7 @@ func (d *Daemon) secretDelete(name string, peer *caller.Chain, out control.Emitt
 		return err
 	}
 	if info.Unreadable {
-		return control.NewProblem(control.CodeError, "secret %s can't be deleted by this nazar-agent: its Keychain item belongs to another signature of the agent, "+
-			"or the login keychain is locked; nothing was changed. To fix it: %s", name, secretRemedy(name))
+		return control.NewProblem(control.CodeError, "secret %s can't be deleted by this nazar-agent: %s; nothing was changed. To fix it: %s", name, d.vault.unreadable(), d.vault.secretRemedy(name))
 	}
 	target := "secret:" + name
 	cl, err := d.claimLogin(target, "delete secret", "not deleted", peer)
@@ -366,7 +366,7 @@ func (d *Daemon) secretDelete(name string, peer *caller.Chain, out control.Emitt
 	defer cl.close() // any return before cl.end(true) is an approval that applied nothing
 	dec, reason := d.broker.Login(platform.Prompt{
 		Title:  fmt.Sprintf("Delete secret %q?", name),
-		Lines:  []string{"This can't be undone; config.yaml keeps its entry."},
+		Lines:  []string{d.deleted("This can't be undone;", "secret") + " config.yaml keeps its entry."},
 		Reason: fmt.Sprintf("delete secret %q", name),
 	})
 	d.logOp(target, dec, "delete secret: "+reason, peer)
@@ -400,7 +400,7 @@ func (d *Daemon) secretGet(name string, peer *caller.Chain, out control.Emitter)
 		return err
 	case info.Broken:
 		d.logOp("secret:"+name, audit.Error, "nazar get: the secret's record is unusable", peer)
-		return control.NewProblem(control.CodeError, "secret %s can't be used: %s; fix: %s", name, secretReason(info), secretRemedy(name))
+		return control.NewProblem(control.CodeError, "secret %s can't be used: %s; fix: %s", name, d.vault.secretReason(info), d.vault.secretRemedy(name))
 	}
 	if peer == nil {
 		peer = &caller.Chain{Unknown: true}
@@ -442,13 +442,100 @@ func resultProblem(r broker.Result) error {
 // parent that is Apple's own git (by signature, never by path or name)
 // running exactly that is skipped, once, and its parent is the receiver.
 // Anything else, a look-alike git included, is the receiver itself.
-func gitReceiver(peer *caller.Chain) *caller.Chain {
+//
+// Without code signatures (Linux) there is no Apple git to recognise, and
+// git runs every helper through `/bin/sh -c`, which on Debian and Ubuntu
+// is dash and stays as the helper's parent (macOS's sh execs it). So there
+// the dispatcher is known by what it runs (a `git` running
+// `credential-nazar`) and the shell by what it was told to run (the
+// helper's command line, nothing else), and each is stepped over once. A
+// to: rule still has to match what is left, and only the file the kernel
+// reports as running can match path: (match.Evaluator.path). Both must be
+// the system's own files (isSystemGit, isSystemShell): a git or sh from a
+// folder the user can write to is not stepped over, so it is the receiver
+// itself and a to: rule that names the transport refuses it. Otherwise a
+// look-alike git set as the helper would run the real one, read the token
+// and pass as the transport above it.
+func (d *Daemon) gitReceiver(peer *caller.Chain) *caller.Chain {
 	recv := peer.Parent()
-	if p, ok := recv.Peer(); ok && p.Code.Team() == "apple" && p.Code.SigningID == "com.apple.git" &&
-		len(p.Args) >= 2 && p.Args[1] == "credential-nazar" {
+	p, ok := recv.Peer()
+	if !ok {
+		return recv
+	}
+	if d.traits.CodeSigning {
+		if p.Code.Team() == "apple" && p.Code.SigningID == "com.apple.git" && len(p.Args) >= 2 && p.Args[1] == "credential-nazar" {
+			return recv.Parent()
+		}
+		return recv
+	}
+	if isSystemGit(p) && len(p.Args) >= 2 && p.Args[1] == "credential-nazar" {
+		recv = recv.Parent()
+		if p, ok = recv.Peer(); !ok {
+			return recv
+		}
+	}
+	if isHelperShell(p) {
 		return recv.Parent()
 	}
 	return recv
+}
+
+// isSystemGit reports whether p runs the system's git: the file the kernel
+// reports is git under /bin, /usr/bin or git's own folder there, which only
+// root can write to. A git elsewhere (Homebrew's, one under the home
+// folder) is a program like any other, and is the receiver itself.
+func isSystemGit(p platform.ProcessInfo) bool {
+	switch dir, base := filepath.Split(p.Path); dir {
+	case "/bin/", "/usr/bin/", "/usr/lib/git-core/", "/usr/libexec/git-core/":
+		return base == "git"
+	}
+	return false
+}
+
+// isHelperShell reports whether p is the /bin/sh git runs a credential
+// helper through (run-command.c, prepare_shell_cmd, which passes the
+// command again as $0): `sh -c '<helper> get' '<helper> get'`, or `sh -c
+// '<cmd> "$@"' <cmd> <args…>` for a command with separate arguments. It
+// must be the system's shell (sh, dash or bash under /bin or /usr/bin, by
+// the file the kernel reports) given that one command and nothing else:
+// the command runs the nazar helper (`git credential-nazar …` or the
+// `git-credential-nazar` link by its path), with no `;`, `|`, `&&` or
+// redirection, which would make the shell a program of its own. The
+// positional parameters ($0 and the "$@" arguments) are not parsed by
+// the shell, so they are only required to be what git puts there.
+func isHelperShell(p platform.ProcessInfo) bool {
+	if !isSystemShell(p) || len(p.Args) < 3 || p.Args[1] != "-c" {
+		return false
+	}
+	command, rest := p.Args[2], p.Args[3:]
+	switch {
+	case len(rest) == 0:
+	case len(rest) == 1 && rest[0] == command:
+	default:
+		c, ok := strings.CutSuffix(command, ` "$@"`)
+		if !ok || len(rest) < 2 || rest[0] != c {
+			return false
+		}
+		command = c
+	}
+	if strings.ContainsAny(command, ";|&<>()`$\n") {
+		return false
+	}
+	f := strings.Fields(command)
+	if len(f) == 0 {
+		return false
+	}
+	if len(f) == 1 {
+		// `sh -c '<link> "$@"' <link> get`: the link by its path alone.
+		return len(rest) >= 2 && filepath.Base(f[0]) == "git-credential-nazar"
+	}
+	switch filepath.Base(f[0]) {
+	case "git":
+		return f[1] == "credential-nazar"
+	case "git-credential-nazar":
+		return true
+	}
+	return false
 }
 
 // urlText is protocol://host for a message: as is when it is plain
@@ -498,7 +585,7 @@ func (d *Daemon) secretHelper(args map[string]string, peer *caller.Chain, out co
 		return err
 	case info.Broken:
 		d.logOp("secret:"+name, audit.Error, "git credential: the secret's record is unusable", peer)
-		return control.NewProblem(control.CodeError, "secret %s can't be used: %s; fix: %s", name, secretReason(info), secretRemedy(name))
+		return control.NewProblem(control.CodeError, "secret %s can't be used: %s; fix: %s", name, d.vault.secretReason(info), d.vault.secretRemedy(name))
 	}
 	if peer == nil {
 		peer = &caller.Chain{Unknown: true}
@@ -506,7 +593,7 @@ func (d *Daemon) secretHelper(args map[string]string, peer *caller.Chain, out co
 	var value []byte
 	defer func() { clear(value) }()
 	r := d.broker.Handle(broker.Request{
-		Secret: name, Delivery: config.DeliverHelper, Chain: peer, Receiver: gitReceiver(peer),
+		Secret: name, Delivery: config.DeliverHelper, Chain: peer, Receiver: d.gitReceiver(peer),
 		Summary: "git credential for " + g.String(), Operation: "git credential", Destination: g.Host,
 		Do: func(ref platform.ApprovalRef) error {
 			v, err := d.secrets.Open(name, ref)

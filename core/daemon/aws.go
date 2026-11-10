@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"reflect"
 	"strconv"
 	"time"
@@ -90,7 +91,7 @@ func (d *Daemon) awsCredential(ctx context.Context, args map[string]string, peer
 		return control.NewProblem(control.CodeRefused, "refused: %s has no CA; nazar aws forget %s, then nazar aws ca create %s makes one", name, name, name)
 	case err != nil:
 		d.logOp(target, audit.Error, "aws credential: the entry's CA is unusable: "+err.Error(), peer)
-		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent; fix: %s", name, awsCAFix(name, err))
+		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent; fix: %s", name, d.vault.awsCAFix(name, err))
 	}
 	if peer == nil {
 		peer = &caller.Chain{Unknown: true}
@@ -167,7 +168,14 @@ func shortDuration(d time.Duration) string {
 }
 
 // awsStdout is k8sStdout for credential_process: fd 1 of the CLI is a pipe
-// whose read end chain[1] alone holds. It returns the refusal's reason, or
+// whose read end chain[1] alone holds. The Go SDK and Terraform run
+// credential_process by `sh -c` (aws design 3.4); where sh stays as the
+// CLI's parent instead of exec'ing it (dash, the /bin/sh of Debian and
+// Ubuntu), chain[1] is that shell, holding the write end it passed on, and
+// the reader is chain[2]: then the platform's StdoutThrough check, which
+// asks the same of the pipe with the shell's fd 1 as the one more
+// reference allowed, and nothing else of it. A platform without that
+// check refuses the chain as before. It returns the refusal's reason, or
 // "". Fail closed.
 func (d *Daemon) awsStdout(peer *caller.Chain) string {
 	if d.o.Pipes == nil {
@@ -176,12 +184,44 @@ func (d *Daemon) awsStdout(peer *caller.Chain) string {
 	if len(peer.Procs) < 2 {
 		return errAWSStdout
 	}
-	ok, err := d.o.Pipes.StdoutReadBy(peer.Procs[0].Ref, peer.Procs[1].Ref)
+	var ok bool
+	var err error
+	if th, through := d.o.Pipes.(platform.StdoutThrough); through && len(peer.Procs) >= 3 && isShellC(peer.Procs[1]) {
+		ok, err = th.StdoutReadByThrough(peer.Procs[0].Ref, peer.Procs[1].Ref, peer.Procs[2].Ref)
+	} else {
+		ok, err = d.o.Pipes.StdoutReadBy(peer.Procs[0].Ref, peer.Procs[1].Ref)
+	}
 	if err != nil {
 		d.o.Logf("aws credential: the output can't be checked: %v", err)
+		return d.stdoutUnknown(err, errAWSStdout, "can't tell who reads the credential's output; try again")
 	}
-	if err != nil || !ok {
+	if !ok {
 		return errAWSStdout
 	}
 	return ""
+}
+
+// isShellC reports whether p is the system's shell running one command
+// line for a program (`/bin/sh -c "<command>"`, as the SDKs run
+// credential_process): sh, dash or bash under /bin or /usr/bin, by the
+// file the kernel reports, with -c and the command as its only arguments.
+// What the command is does not matter here: the pipe check says whether
+// the shell can read the output, and the rules are judged on the chain.
+func isShellC(p platform.ProcessInfo) bool {
+	return isSystemShell(p) && len(p.Args) == 3 && p.Args[1] == "-c"
+}
+
+// isSystemShell reports whether p runs the system's shell: sh, dash or
+// bash under /bin or /usr/bin, by the file the kernel reports (never
+// argv[0], which the caller chooses).
+func isSystemShell(p platform.ProcessInfo) bool {
+	dir, base := filepath.Split(p.Path)
+	if dir != "/bin/" && dir != "/usr/bin/" {
+		return false
+	}
+	switch base {
+	case "sh", "dash", "bash":
+		return true
+	}
+	return false
 }

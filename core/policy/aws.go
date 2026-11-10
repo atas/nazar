@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"path/filepath"
 
 	"github.com/atas/nazar/core/caller"
 	"github.com/atas/nazar/core/config"
@@ -50,7 +51,7 @@ func (e *Engine) EvaluateAWS(name string, c *caller.Chain) Outcome {
 	}
 	// Check 1: chain[1] is a live, full record with an identity an
 	// approval can be remembered under (as EvaluateK8s).
-	if len(c.Procs) < 2 || !identified(c.Procs[1]) {
+	if len(c.Procs) < 2 || !e.identified(c.Procs[1]) {
 		return block(ReasonAWSCaller)
 	}
 	client := c.Procs[1]
@@ -62,8 +63,26 @@ func (e *Engine) EvaluateAWS(name string, c *caller.Chain) Outcome {
 	e.first(&out, entry.Rules, e.cfg.AWSFallback(name), entry.Own != nil, view, nil)
 	out.RuleID = awsRuleID(out.RuleID, entry)
 	out.Receiver = match.Identity(client)
+	if len(c.Procs) >= 3 && shellC(client.Path, client.Args) {
+		// The Go SDK and Terraform run credential_process through
+		// `/bin/sh -c`, which on Debian and Ubuntu stays as the CLI's
+		// parent. The shell is the same file for every program, so the
+		// program that ran it is part of who receives: an approval given
+		// to one program's shell is not another program's.
+		out.Receiver += " for " + match.Identity(c.Procs[2])
+	}
 	e.scope(&out, c)
 	return out
+}
+
+// shellC reports whether a process is the system's shell (sh, dash or bash
+// under /bin or /usr/bin, by the file the kernel reports) run with -c.
+func shellC(path string, args []string) bool {
+	dir, base := filepath.Split(path)
+	if dir != "/bin/" && dir != "/usr/bin/" || len(args) < 2 || args[1] != "-c" {
+		return false
+	}
+	return base == "sh" || base == "dash" || base == "bash"
 }
 
 // awsRuleID binds a rule's (or the fallback's) id to what the entry mints:

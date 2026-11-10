@@ -4,7 +4,9 @@
 //	~/.nazar/            0700
 //	├── config/          0700: config.yaml (0600), the file the user approves
 //	├── keys/            public keys (<name>.pub), k8s CA certs (k8s-ca-<context>.crt)
-//	└── run/             0700: agent.sock, control.sock, the run sockets; recreated on every start
+//	├── run/             0700: agent.sock, control.sock, the run sockets; recreated on every start
+//	├── vault/           0700, Linux only: the file vault's items (0600), one file per item
+//	└── log/             0700, Linux only: audit.log and audit.log.1 (0600); made by the first entry
 //
 // Every default path of the core, the CLI and the agent comes from here.
 package layout
@@ -46,6 +48,16 @@ func AgentSocket(home string) string { return filepath.Join(RunDir(home), "agent
 
 // ControlSocket is ~/.nazar/run/control.sock.
 func ControlSocket(home string) string { return filepath.Join(RunDir(home), "control.sock") }
+
+// VaultDir is ~/.nazar/vault, the file vault's folder on Linux
+// (core/platform/linux/vault). macOS keeps the vault in the Keychain and
+// never makes it.
+func VaultDir(home string) string { return filepath.Join(Root(home), "vault") }
+
+// AuditLog is ~/.nazar/log/audit.log, nazar-agent's audit log on Linux
+// (audit.FileSink makes the folder, 0700). macOS logs to the unified log and
+// never makes it.
+func AuditLog(home string) string { return filepath.Join(Root(home), "log", "audit.log") }
 
 // Prepare makes the folders of the home that nazar-agent needs at start:
 // ~/.nazar, config/ and run/, 0700 when it makes them. ~/.nazar and run/

@@ -272,6 +272,45 @@ func TestReleaseBuildHasNoTestSocket(t *testing.T) {
 	}
 }
 
+// The release build has no way past the refusal of nazar run on Linux:
+// run_testlinux.go is compiled only with -tags nazartest.
+func TestReleaseBuildHasNoRunOnLinux(t *testing.T) {
+	if testing.Short() {
+		t.Skip("builds the CLI")
+	}
+	list := func(tags ...string) string {
+		args := append([]string{"list"}, tags...)
+		args = append(args, "-f", "{{.GoFiles}}", ".")
+		out, err := exec.Command("go", args...).CombinedOutput()
+		if err != nil {
+			t.Fatalf("go list: %v\n%s", err, out)
+		}
+		return string(out)
+	}
+	if strings.Contains(list(), "run_testlinux.go") || !strings.Contains(list("-tags", "nazartest"), "run_testlinux.go") {
+		t.Fatal("run_testlinux.go must be in the nazartest build only")
+	}
+	build := func(tags ...string) []byte {
+		bin := filepath.Join(t.TempDir(), "nazar")
+		args := append([]string{"build"}, tags...)
+		args = append(args, "-o", bin, ".")
+		if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
+			t.Fatalf("go build: %v\n%s", err, out)
+		}
+		b, err := os.ReadFile(bin)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return b
+	}
+	if bytes.Contains(build(), []byte("NAZAR_TEST_RUN_ON_LINUX")) {
+		t.Fatal("the release build contains NAZAR_TEST_RUN_ON_LINUX")
+	}
+	if !bytes.Contains(build("-tags", "nazartest"), []byte("NAZAR_TEST_RUN_ON_LINUX")) {
+		t.Fatal("the check must see the string in the nazartest build")
+	}
+}
+
 // Security review: a reply for another context is not passed on.
 func TestK8sCredentialRefusesAReplyForAnotherContext(t *testing.T) {
 	h := newHarness(t)

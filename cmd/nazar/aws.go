@@ -8,6 +8,7 @@ import (
 
 	"github.com/atas/nazar/core/config"
 	"github.com/atas/nazar/core/control"
+	"github.com/atas/nazar/core/platform"
 )
 
 // aws is `nazar aws …` (aws design 8).
@@ -109,24 +110,20 @@ func (a *app) awsCACreate(args []string) int {
 		return a.fail(control.NewProblem(control.CodeError, "aws ca create: nazar-agent's reply has no usable CA certificate or identity; nazar aws list shows the entry"))
 	}
 	if *onlyWhenUnlocked && e.CA.WhileLocked {
-		return a.fail(wrongAccess("the CA of "+name, "nazar aws forget "+name))
+		return a.fail(a.wrongAccess("the CA of "+name, "nazar aws forget "+name))
 	}
 	return a.emit(e, func() {
-		fmt.Fprintf(a.stdout, "%s is set up: its CA is in the Secure Enclave (SHA-256 %s), config.yaml has aws.%s.\n",
-			name, term(e.CA.Fingerprint), name)
-		if e.CA.WhileLocked {
-			fmt.Fprintln(a.stdout, "The CA signs while the Mac is locked too, once you have logged in since it started (fixed for its life).")
-		} else {
-			fmt.Fprintln(a.stdout, "The CA signs only while the Mac is unlocked (fixed for its life).")
-		}
-		fmt.Fprint(a.stdout, awsSteps(name, term(e.CA.CertFile), e.Identity.User, credentialProcess(self, name)))
+		fmt.Fprintf(a.stdout, "%s is set up: its CA is in %s (SHA-256 %s), config.yaml has aws.%s.\n",
+			name, a.traits().Chip, term(e.CA.Fingerprint), name)
+		fmt.Fprintln(a.stdout, a.caLockedLine(e.CA.WhileLocked))
+		fmt.Fprint(a.stdout, awsSteps(name, term(e.CA.CertFile), e.Identity.User, credentialProcess(self, name), a.traits()))
 	})
 }
 
 // awsSteps are aws design 10, filled in: what makes AWS trust the CA and the
 // AWS CLI use the entry. nazar runs none of it. Step 1 needs jq, to put
 // the PEM into the JSON AWS takes; it says so.
-func awsSteps(name, certFile, user, process string) string {
+func awsSteps(name, certFile, user, process string, tr platform.Traits) string {
 	return fmt.Sprintf(`
 Next, with your AWS admin credentials (nazar runs none of this; read each step before you run it):
 
@@ -154,7 +151,7 @@ Next, with your AWS admin credentials (nazar runs none of this; read each step b
     trustAnchorArn: <trust anchor ARN>
     profileArn: <profile ARN>
     roleArn: <role ARN>
-   That loosens access, so it waits for nazar config apply and Touch ID.
+   That loosens access, so it waits for nazar config apply and %[5]s.
 
 5. Add the profile to ~/.aws/config (nazar never edits it):
 [profile %[1]s]
@@ -163,7 +160,7 @@ Next, with your AWS admin credentials (nazar runs none of this; read each step b
 6. Check it:
   aws sts get-caller-identity --profile %[1]s
   nazar log --target aws:%[1]s --since 10m
-`, name, certFile, user, process)
+`, name, certFile, user, process, tr.LoginGate)
 }
 
 func (a *app) awsList(args []string) int {
