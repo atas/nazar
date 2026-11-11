@@ -53,7 +53,7 @@ func (a *app) configApply() int {
 		}
 		req = map[string]string{"hash": st.Staged.Hash}
 		if !a.json {
-			fmt.Fprintln(a.stdout, "staged in config.yaml, waiting for your approval (Touch ID / Watch / password):")
+			fmt.Fprintf(a.stdout, "staged in config.yaml, waiting for your approval (%s):\n", a.approval())
 			for _, l := range st.Staged.Changes {
 				fmt.Fprintf(a.stdout, "  %s\n", term(l))
 			}
@@ -109,7 +109,10 @@ func (a *app) configCheck() int {
 	case err != nil:
 		return a.fail(control.NewProblem(control.CodeError, "reading %s: %v", path, err))
 	default:
-		_, probs := config.Parse(data, config.Env{Home: a.home()})
+		// On Linux the file is judged as nazar-agent there judges it:
+		// signed: and app: with team: are refused, since nothing can match
+		// them.
+		_, probs := config.Parse(data, config.Env{Home: a.home(), NoCodeSigning: a.linux})
 		res.Valid = !probs.HasErrors()
 		for _, p := range probs {
 			res.Problems = append(res.Problems, control.ConfigProblem{Severity: string(p.Severity), Path: p.Path, Line: p.Line, Message: p.Message})
@@ -180,7 +183,7 @@ func (a *app) printConfigCheck(res control.ConfigCheck, running bool) {
 		fmt.Fprintf(a.stdout, "%s is invalid; nazar-agent keeps the last approved config\n", term(res.Path))
 	}
 	if res.Staged != nil {
-		fmt.Fprintln(a.stdout, "staged, waiting for approval (Touch ID / Watch / password):")
+		fmt.Fprintf(a.stdout, "staged, waiting for approval (%s):\n", a.approval())
 		for _, c := range res.Staged.Changes {
 			fmt.Fprintf(a.stdout, "  %s\n", term(c))
 		}
@@ -209,11 +212,11 @@ func (a *app) trust(args []string) int {
 	}
 	switch {
 	case len(pos) > 0:
-		return a.usageError("trust: a path: rule needs no trust; trust takes --app <bundle-id>")
+		return a.usageError("%s", a.say("trust: a path: rule needs no trust; trust takes --app <bundle-id>"))
 	case !appID.set:
-		return a.usageError("trust: expected --app <bundle-id>")
+		return a.usageError("%s", a.say("trust: expected --app <bundle-id>"))
 	case appID.value == "":
-		return a.usageError("trust: --app needs a bundle id")
+		return a.usageError("%s", a.say("trust: --app needs a bundle id"))
 	}
 	return a.trustApp(appID.value)
 }
@@ -226,15 +229,21 @@ func (a *app) trustApp(bundleID string) int {
 	if err := a.call(control.CmdTrustApp, map[string]string{"app": bundleID}, control.KindAppPin, &pin); err != nil {
 		return a.fail(err)
 	}
+	// On Linux the pin is the app's executable hash (Team holds it).
+	pinWord := a.traits().PinWord
 	return a.emit(pin, func() {
 		switch {
 		case !pin.Changed:
-			fmt.Fprintf(a.stdout, "app %s is already pinned to team %s (installed at %s)\n", term(pin.BundleID), term(pin.Team), term(pin.Path))
+			fmt.Fprintf(a.stdout, "app %s is already pinned to %s %s (installed at %s)\n", term(pin.BundleID), pinWord, term(pin.Team), term(pin.Path))
 		case pin.OldTeam != "":
-			fmt.Fprintf(a.stdout, "pinned app %s to team %s, replacing %s (installed at %s)\n", term(pin.BundleID), term(pin.Team), term(pin.OldTeam), term(pin.Path))
+			fmt.Fprintf(a.stdout, "pinned app %s to %s %s, replacing %s (installed at %s)\n", term(pin.BundleID), pinWord, term(pin.Team), term(pin.OldTeam), term(pin.Path))
 		default:
-			fmt.Fprintf(a.stdout, "pinned app %s to team %s (installed at %s)\n", term(pin.BundleID), term(pin.Team), term(pin.Path))
+			fmt.Fprintf(a.stdout, "pinned app %s to %s %s (installed at %s)\n", term(pin.BundleID), pinWord, term(pin.Team), term(pin.Path))
 		}
-		fmt.Fprintln(a.stdout, "app: matchers for this bundle id now match that team")
+		if a.linux {
+			fmt.Fprintln(a.stdout, "app: matchers for this app now match that executable")
+		} else {
+			fmt.Fprintln(a.stdout, "app: matchers for this bundle id now match that team")
+		}
 	})
 }

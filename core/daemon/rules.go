@@ -142,7 +142,7 @@ func (d *Daemon) sshKeyRules(name string, out control.Emitter) error {
 func (d *Daemon) keyWarnings(k keys.Info, c *config.Config) []string {
 	w := []string{}
 	if !k.Broken {
-		if msg := presenceAdvice(c, k.Name, k.Auth); msg != "" {
+		if msg := presenceAdviceOn(d.traits, c, k.Name, k.Auth); msg != "" {
 			w = append(w, msg)
 		}
 	}
@@ -289,7 +289,7 @@ func (d *Daemon) configEdit(args map[string]string, peer *caller.Chain, out cont
 	if err != nil {
 		return err
 	}
-	env := config.Env{Home: d.o.Home}
+	env := d.configEnv()
 	if data != nil {
 		if _, probs := config.Parse(data, env); probs.HasErrors() {
 			return control.NewProblem(control.CodeError, "config.yaml is invalid; fix it first (`nazar config check`)")
@@ -366,7 +366,7 @@ func (d *Daemon) configEdit(args map[string]string, peer *caller.Chain, out cont
 	if old := d.stager.Active(); e.IsKey() && chipUnfit(nw, e.Name) > chipUnfit(old, e.Name) {
 		key := e.Name
 		if info, err := d.keys.Get(key); err == nil && info.Auth == platform.AuthUserPresence {
-			return control.NewProblem(control.CodeError, "SSH key %s asks on every use (enforced by the chip); create another key for a looser rule (nothing was changed)", strconv.QuoteToASCII(key))
+			return control.NewProblem(control.CodeError, "SSH key %s asks on every use (enforced by %s); create another key for a looser rule (nothing was changed)", strconv.QuoteToASCII(key), d.traits.Enforcer)
 		}
 	}
 	res := control.ConfigEdit{TypeMeta: control.Meta(control.KindConfigEdit), Op: op, Path: d.o.ConfigPath,

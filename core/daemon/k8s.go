@@ -44,27 +44,26 @@ func (d *Daemon) refuseK8sNotCLI(req control.Request, peer *caller.Chain) error 
 // opK8sCredential is the audit operation of a credential request.
 const opK8sCredential = "k8s credential"
 
-// k8sCACheckFirst opens the remedy for a CA nazar made, as keyCheckFirst
+// k8sCACheckRest closes the check that opens the remedy for a CA nazar made, as keyCheckFirst
 // does for a key: the check that loses nothing comes first.
-const k8sCACheckFirst = "first, if the login keychain is locked, unlock it, and if this nazar-agent is not the one you installed, reinstall that one, " +
-	"and run nazar k8s list again (deleting the item destroys the CA for good, and the cluster must then trust a new one); if the CA is still unreadable: "
+const k8sCACheckRest = "and run nazar k8s list again (deleting the item destroys the CA for good, and the cluster must then trust a new one); if the CA is still unreadable: "
 
 // k8sCARemedy is keyRemedy for a k8s-ca/<name> item (spec 9): the check
 // first, then the item removed by hand, then a new CA, which the cluster
 // must trust again. Context names are plain words; anything else gets only
 // the way to remove the one item.
-func k8sCARemedy(name string) string {
+func (w vaultWords) k8sCARemedy(name string) string {
 	account := k8s.VaultPrefix + name
 	if !config.ValidK8sContextName(name) || !plainWord(account) {
 		if !plainWord(account) {
-			return removeItemByHand(account)
+			return w.removeItemByHand(account)
 		}
-		return deleteItem(account)
+		return w.deleteItem(account)
 	}
 	// ca create refuses a context set up already, so forget comes first; it
 	// also drops the context's rules, which the user adds again.
 	return fmt.Sprintf("%s%s, then nazar k8s forget %s (it removes the context's config entry, its rules and nazar's kubeconfig entries), then nazar k8s ca create %s, then add its certificate to the cluster's client CA bundle (nazar k8s ca show %s --microk8s), then add the context's rules again",
-		k8sCACheckFirst, deleteItem(account), name, name, name)
+		w.checkFirst(k8sCACheckRest, account), w.deleteItem(account), name, name, name)
 }
 
 // k8sCredential mints a credential for context name (k8s design 1.2, 6.1).
@@ -101,7 +100,7 @@ func (d *Daemon) k8sCredential(args map[string]string, peer *caller.Chain, out c
 		return control.NewProblem(control.CodeRefused, "refused: %s has no CA; nazar k8s ca create %s makes one", name, name)
 	case err != nil:
 		d.logOp(target, audit.Error, "k8s credential: the context's CA is unusable: "+err.Error(), peer)
-		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent; fix: %s", name, k8sCAFix(name, err))
+		return control.NewProblem(control.CodeError, "the CA of %s can't be used by this nazar-agent; fix: %s", name, d.vault.k8sCAFix(name, err))
 	}
 	provider := d.k8sIssue[ctx.Credential]
 	if provider == nil {
@@ -181,9 +180,22 @@ func (d *Daemon) k8sStdout(peer *caller.Chain) string {
 	ok, err := d.o.Pipes.StdoutReadBy(peer.Procs[0].Ref, peer.Procs[1].Ref)
 	if err != nil {
 		d.o.Logf("k8s credential: the plugin's output can't be checked: %v", err)
+		return d.stdoutUnknown(err, errStdout, "can't tell who reads the plugin's output; try again")
 	}
-	if err != nil || !ok {
+	if !ok {
 		return errStdout
 	}
 	return ""
+}
+
+// stdoutUnknown is the refusal for a stdout check that failed with err. On
+// Linux the check reads /proc and fails closed for a moment on a process it
+// cannot see into (package pipes): nothing wrapped the program, so the
+// message says to try again, unless the client is gone. macOS has next to
+// no such error and keeps its refusal word for word.
+func (d *Daemon) stdoutUnknown(err error, refused, unknown string) string {
+	if d.traits.Enforcer != platform.MacTraits.Enforcer && !errors.Is(err, platform.ErrNoProcess) {
+		return unknown
+	}
+	return refused
 }

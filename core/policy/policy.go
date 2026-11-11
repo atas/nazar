@@ -58,6 +58,13 @@ type Outcome struct {
 type Engine struct {
 	cfg *config.Config
 	m   *match.Evaluator
+	// NoCodeSigning says the platform has no code signatures (Linux:
+	// platform.Traits.CodeSigning false), so no process is ever Signed and
+	// the program that ran nazar (check 1 of a k8s or aws credential) is
+	// identified by the file it runs and that file's hash, which is what
+	// its approval is remembered under there (match.Identity). The daemon
+	// sets it from the platform's traits; false is macOS.
+	NoCodeSigning bool
 }
 
 // New returns an engine for cfg that evaluates matchers with m.

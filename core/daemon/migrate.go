@@ -31,7 +31,7 @@ func (d *Daemon) migrateConfig() {
 	if err != nil || data == nil {
 		return
 	}
-	out, ok := config.Migrate(data, config.Env{Home: d.o.Home})
+	out, ok := config.Migrate(data, d.configEnv())
 	if !ok {
 		return
 	}

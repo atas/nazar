@@ -1,0 +1,51 @@
+# nazar for Linux: the TPM SSH agent and its CLI, a preview. Rendered by
+# `scripts/release-linux.sh formula` from packaging/homebrew/nazar-linux.rb.in
+# in the nazar repository; edit the template, not the rendered formula. It is
+# not named nazar because a formula named nazar would win over the macOS cask.
+class NazarLinux < Formula
+  desc "SSH agent with TPM keys and per-key caller rules (Linux preview)"
+  homepage "https://github.com/atas/nazar"
+  version "@VERSION@"
+  license "Apache-2.0"
+
+  depends_on :linux
+
+  on_intel do
+    url "https://github.com/atas/nazar/releases/download/v@VERSION@/nazar-@VERSION@-linux-amd64.tar.gz"
+    sha256 "@AMD64_SHA256@"
+  end
+
+  on_arm do
+    url "https://github.com/atas/nazar/releases/download/v@VERSION@/nazar-@VERSION@-linux-arm64.tar.gz"
+    sha256 "@ARM64_SHA256@"
+  end
+
+  def install
+    bin.install "nazar", "nazar-agent"
+    bin.install_symlink "nazar" => "nazar-sign-git"
+    bin.install_symlink "nazar" => "git-credential-nazar"
+  end
+
+  # A formula can't run sudo or start a user service, so these are the
+  # user's to run.
+  def caveats
+    <<~EOS
+      nazar on Linux is a preview: not yet verified on real hardware.
+
+      Run this once, then log out and back in:
+        sudo #{opt_bin}/nazar install --system
+      It runs that file as root. Homebrew checked the tarball's sha256, so run it now; if a
+      program prints that line later, check the file against the release's SHA256SUMS first.
+
+      Run this after this install and after every upgrade:
+        nazar install --no-links
+
+      Point ssh at the agent (~/.ssh/config):
+        IdentityAgent ~/.nazar/run/agent.sock
+    EOS
+  end
+
+  test do
+    assert_match version.to_s, shell_output("#{bin}/nazar version")
+  end
+end

@@ -7,6 +7,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
+	"os"
 	"strconv"
 	"strings"
 	"time"
@@ -17,6 +18,7 @@ import (
 
 	"github.com/atas/nazar/core/control"
 	"github.com/atas/nazar/core/layout"
+	"github.com/atas/nazar/core/platform"
 )
 
 // version is what `nazar version` prints. `make agent` sets it to the
@@ -30,22 +32,35 @@ var version = "0.1.0-dev"
 // for the value (never an argument, secrets design 7.1), and `k8s ca
 // create` at a terminal, for the context, the server and its CA.
 type app struct {
+	// linux: the CLI runs on Linux (main sets it from runtime.GOOS). Every
+	// Linux branch of the CLI depends on it, never on the build's GOOS, so
+	// tests drive both on any OS; a harness that does not set it gets the
+	// macOS behaviour.
+	linux bool
+
 	stdout, stderr io.Writer
 	stdin          io.Reader
 	// stdinTerminal reports whether stdin is a terminal, and readHidden
 	// reads one line from it with echo off (nil = no hidden prompt).
 	stdinTerminal func() bool
 	readHidden    func() ([]byte, error)
-	getenv        func(string) string
-	environ       func() []string
-	exec          func(argv0 string, argv []string, envv []string) error
+	// noHiddenPrompt: this build has no hidden prompt, so its help offers
+	// none (noprompt.go). main sets it; false in every existing test
+	// harness, which keep the macOS text.
+	noHiddenPrompt bool
+	getenv         func(string) string
+	environ        func() []string
+	exec           func(argv0 string, argv []string, envv []string) error
 	// resetForExec readies the process for nazar run's exec: the folder
 	// dirFD names becomes the working directory, and the process state the
 	// caller left (fds, umask, core limit, signals, and on macOS the Mach
 	// exception ports) is reset. nil refuses every run.
 	resetForExec func(dirFD int) error
 	runLog       func(ctx context.Context, args []string, line func([]byte)) error
-	verifier     control.PeerVerifier // nil = a.defaultVerifier()
+	// readAuditFile reads an audit file from offset on, for `nazar log` on
+	// Linux, and says which file it read (nil = readAuditFrom).
+	readAuditFile func(path string, offset int64) ([]byte, os.FileInfo, error)
+	verifier      control.PeerVerifier // nil = a.defaultVerifier()
 	// executable returns the CLI's own path with symlinks resolved, and
 	// plistProgram ProgramArguments[0] of a LaunchAgent plist; together
 	// they locate the Nazar.app to trust (appident.go).
@@ -63,6 +78,18 @@ type app struct {
 	// Tests always replace launchctl; a nil one refuses to install.
 	launchctl func(args ...string) error
 	uid       func() int
+	// The seams of install on Linux (installlinux.go); main sets them only
+	// on Linux, and a nil one refuses the command, as a nil launchctl does.
+	// systemctl runs /usr/bin/systemctl --user, sysCommand a program by
+	// absolute path (install --system), tpmAccess opens and closes
+	// /dev/tpmrm0 and euid is the effective user ID. sysRoot is the root
+	// install --system writes under: "" in production, a temporary folder in
+	// tests.
+	systemctl  func(args ...string) error
+	sysCommand func(argv0 string, args ...string) error
+	sysRoot    string
+	tpmAccess  func() error
+	euid       func() int
 	// openUI opens the app Launch Services has for a bundle id and
 	// returns its path (errUINotInstalled when there is none): `nazar ui`.
 	openUI func(bundleID string) (string, error)
@@ -78,7 +105,10 @@ type app struct {
 	accountHome func() string
 	// selfPath is the absolute path this CLI was started by, links not
 	// resolved: what nazar k8s ca create writes into a kubeconfig and aws
-	// ca create prints for ~/.aws/config.
+	// ca create prints for ~/.aws/config. os.Executable gives that on
+	// macOS; on Linux it resolves /proc/self/exe to the versioned file an
+	// upgrade removes, so main sets linuxSelfPath there (the link the user
+	// ran).
 	selfPath func() (string, error)
 
 	json bool
@@ -162,6 +192,15 @@ Guide (for people and AI agents): https://github.com/atas/nazar/blob/main/docs/C
 
 func (a *app) home() string { return a.getenv("HOME") }
 
+// traits are the words and abilities of the platform the CLI runs on:
+// LinuxTraits on Linux, MacTraits otherwise.
+func (a *app) traits() platform.Traits {
+	if a.linux {
+		return platform.LinuxTraits
+	}
+	return platform.MacTraits
+}
+
 func (a *app) controlSocket() string {
 	if s := a.getenv("NAZAR_CONTROL_SOCKET"); s != "" {
 		return s
@@ -239,8 +278,7 @@ func (a *app) run(args []string) int {
 	case "completion":
 		return a.completion(rest)
 	case "version":
-		return a.emit(map[string]string{"apiVersion": control.APIVersion, "kind": "Version", "version": version},
-			func() { fmt.Fprintln(a.stdout, "nazar", version) })
+		return a.version()
 	case "ssh-key":
 		return a.sshKey(rest)
 	case "secret":
@@ -275,6 +313,17 @@ func (a *app) run(args []string) int {
 		return a.uninstall(rest)
 	}
 	return a.usageError("unknown command %q", cmd)
+}
+
+// version is `nazar version`. A Linux build is a preview until it has been
+// checked on real hardware or a VM with a vTPM, and says so in both views.
+func (a *app) version() int {
+	if a.linux {
+		return a.emit(map[string]string{"apiVersion": control.APIVersion, "kind": "Version", "version": version, "preview": "linux"},
+			func() { fmt.Fprintf(a.stdout, "nazar %s (Linux preview)\n", version) })
+	}
+	return a.emit(map[string]string{"apiVersion": control.APIVersion, "kind": "Version", "version": version},
+		func() { fmt.Fprintln(a.stdout, "nazar", version) })
 }
 
 // completion is `nazar completion bash|zsh|fish`: the script on stdout.
@@ -329,7 +378,7 @@ func (a *app) fail(err error) int {
 		if a.helpFor != "" {
 			fmt.Fprintf(a.stderr, "nazar help %s: its flags and examples\n", a.helpFor)
 		} else {
-			fmt.Fprint(a.stderr, usage)
+			fmt.Fprint(a.stderr, a.usageText())
 		}
 	}
 	return p.ExitCode()

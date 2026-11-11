@@ -543,3 +543,86 @@ func checkLinks(t *testing.T, name, text string, absoluteOnly bool) []string {
 	}
 	return paths
 }
+
+// The Linux summary is what a reader relies on most, so its "other users stay
+// out" names every way the section says that does not hold: the dialog text on
+// the command line (7.4), the prompt spoofing (7.12) and the tss group, which
+// lets any process of an installing user clear the TPM (7.16).
+func TestThreatModelLinuxSummaryNamesWhatReachesOtherUsers(t *testing.T) {
+	b, err := os.ReadFile(filepath.Join(repoRoot, "docs", "THREAT-MODEL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(b), "- **Other users stay out**")
+	if !ok {
+		t.Fatal("the Linux summary has no \"Other users stay out\" bullet")
+	}
+	bullet, _, ok := strings.Cut(rest, "\n- **")
+	if !ok {
+		t.Fatal("the \"Other users stay out\" bullet has no end")
+	}
+	for _, want := range []string{"7.4", "7.12", "7.16", "clearing it"} {
+		if !strings.Contains(bullet, want) {
+			t.Errorf("the \"Other users stay out\" bullet does not name %s:%s", want, bullet)
+		}
+	}
+	for _, claim := range []string{"one exception", "Two things"} {
+		if strings.Contains(bullet, claim) {
+			t.Errorf("the \"Other users stay out\" bullet says %q, the section gives three:%s", claim, bullet)
+		}
+	}
+}
+
+// Every place Linux is weaker says so (the spec's anti-goal): the Linux text
+// of the README, the guide, CLI.md and the threat model says that same-user
+// code reads every secret, not only that it uses the keys, and that a held
+// machine gives up every key without disk encryption (THREAT-MODEL 7.17),
+// which the macOS section 5.17 rules out.
+func TestLinuxDocsSayWhatIsWeaker(t *testing.T) {
+	for _, f := range []struct{ path, section string }{
+		{filepath.Join(repoRoot, "README.md"), "### Linux"},
+		{filepath.Join(repoRoot, "docs", "GUIDE.md"), "## Linux (preview)"},
+		{filepath.Join(repoRoot, "docs", "CLI.md"), "## Linux"},
+		{filepath.Join(repoRoot, "docs", "THREAT-MODEL.md"), "## 7. Linux (preview)"},
+	} {
+		b, err := os.ReadFile(f.path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, linux, ok := strings.Cut(string(b), "\n"+f.section+"\n")
+		if !ok {
+			t.Fatalf("%s has no section %q", f.path, f.section)
+		}
+		for _, want := range []string{"read every secret", "encrypt"} {
+			if !strings.Contains(linux, want) {
+				t.Errorf("%s, section %q, does not say %q", f.path, f.section, want)
+			}
+		}
+	}
+	tm, err := os.ReadFile(filepath.Join(repoRoot, "docs", "THREAT-MODEL.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, s717, ok := strings.Cut(string(tm), "\n### 7.17 ")
+	if !ok {
+		t.Fatal("THREAT-MODEL has no section 7.17 on a held machine")
+	}
+	for _, want := range []string{"5.17", "Full-disk encryption", "no password", "empty authorization"} {
+		if !strings.Contains(s717, want) {
+			t.Errorf("THREAT-MODEL 7.17 does not say %q", want)
+		}
+	}
+	// The README's headline keeps "can't be copied off" for the Mac alone,
+	// and says of Linux what 7.2 says: keys are tied to the TPM but any
+	// same-user process can use them, and read every secret. It never says
+	// the keys are held "the same way".
+	readme, err := os.ReadFile(filepath.Join(repoRoot, "README.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	head, _, _ := strings.Cut(string(readme), "\n## ")
+	if strings.Contains(head, "or the TPM on Linux") || strings.Contains(head, "the same way") ||
+		!strings.Contains(head, "any program running as you") || !strings.Contains(head, "read every secret") {
+		t.Errorf("the README headline claims for Linux what holds on the Mac:\n%s", head)
+	}
+}

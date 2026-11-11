@@ -4,6 +4,9 @@ nazar keeps your SSH keys inside the Mac's Secure Enclave and decides, per app, 
 them. You drive it with one command, `nazar`, and one file, `~/.nazar/config/config.yaml`.
 Nazar UI.app is optional: it only shows and edits what the CLI can.
 
+This guide is written for macOS. On Linux (a preview, with keys in the TPM), read [Linux](#linux)
+first.
+
 ## The picture
 
 ```
@@ -28,7 +31,7 @@ Nazar UI.app is optional: it only shows and edits what the CLI can.
 
 nazar edits none of the files below: you add each line yourself, and `nazar status` checks them.
 
-**1. Install.** An Apple silicon Mac on macOS 26 or later:
+**1. Install.** An Apple silicon Mac on macOS 26 or later ([Linux](#linux) has its own steps):
 
 ```bash
 brew install atas/tap/nazar        # the agent and the CLI; starts the agent
@@ -72,8 +75,8 @@ git config --global commit.gpgsign true
 ```
 
 **5. HTTPS tokens for git** (optional). Store the token with `nazar secret add GITHUB_PERSONAL_ACCESS_TOKEN`
-(hidden prompt), give its entry the host and receiver ([Secrets](#secrets)), and make nazar git's
-helper for the host:
+(hidden prompt, macOS only; on Linux pipe it), give its entry the host and receiver
+([Secrets](#secrets)), and make nazar git's helper for the host:
 
 ```bash
 git config --global --replace-all credential.https://github.com.helper ""
@@ -132,7 +135,7 @@ nazar ssh-key rule add github --apps signed:Q6L2SF6YDW:com.anthropic.claude-code
 | Make a key nothing can use while the Mac is locked | `nazar ssh-key create deploy --only-when-unlocked` (see [While the Mac is locked](#while-the-mac-is-locked)) |
 | Change a rule | `nazar ssh-key rule set github 2 --gate login` (2 = the `#` column of `rules`) |
 | Remove a rule | `nazar ssh-key rule remove github 2` |
-| Store an API token (Touch ID once) | `printf '%s' "$TOKEN" \| nazar secret add NAME` (or type it at the hidden prompt) |
+| Store an API token (Touch ID once) | `printf '%s' "$TOKEN" \| nazar secret add NAME` (on macOS, or type it at the hidden prompt) |
 | Let an app receive a secret | `nazar secret rule add NAME --apps app:com.googlecode.iterm2 --to signed:apple:com.apple.git-remote-http --gate login --scope session` (`rule set` and `rule remove` as for a key; the rule numbers are the ones `nazar --json secret list` shows) |
 | Let git push and pull with a stored GitHub token | the [guide's "Secrets: the GitHub token"](GUIDE.md#secrets-the-github-token) steps |
 | Give a script a secret | `nazar get NAME` (needs `stdout` in its `deliver` and a rule naming the script's interpreter in `to:`) |
@@ -142,7 +145,7 @@ nazar ssh-key rule add github --apps signed:Q6L2SF6YDW:com.anthropic.claude-code
 | Forget every remembered approval now | `nazar revoke --all` |
 | Find the apps nazar has seen | `nazar apps list` |
 | Check the config file without applying it | `nazar config check` |
-| Open the window | `nazar ui` |
+| Open the window (macOS) | `nazar ui` |
 
 ## Very sensitive keys
 
@@ -204,13 +207,13 @@ decide who may receive it.
 
 ```bash
 printf '%s' "$GITHUB_PERSONAL_ACCESS_TOKEN" | nazar secret add GITHUB_PERSONAL_ACCESS_TOKEN
-nazar secret add NOTES             # typed at a hidden prompt instead
+nazar secret add NOTES             # macOS: typed at a hidden prompt instead
 nazar secret list                  # names, never values
 nazar secret rm NOTES              # erased for good; config.yaml keeps its entry
 ```
 
-The value comes from stdin or a hidden prompt, never from an argument (an argument is visible
-in `ps`). `secret add` asks for Touch ID once and writes the secret's entry in
+The value comes from stdin or, on macOS, a hidden prompt, never from an argument (an argument
+is visible in `ps`). `secret add` asks for Touch ID once and writes the secret's entry in
 `config.yaml` under `secrets:`: blocked, plus a login rule for the terminal app you typed it in.
 Like a key, the secret can be opened while the Mac is locked unless you add it with
 `--only-when-unlocked` ([While the Mac is locked](#while-the-mac-is-locked)).
@@ -221,8 +224,8 @@ like a key's, with the same flags and the same Touch ID for a change that loosen
 `nazar secret rule add|set|remove NAME …`. Its own gate stays `block` (there is no `secret set`).
 To change a value,
 `nazar secret rm` it and add it again. A value only ever goes to the genuine nazar CLI, never to
-another program on the control socket. The hidden prompt takes one line of at most about 1000
-bytes; anything longer or with several lines (a key file, JSON) is piped:
+another program on the control socket. The hidden prompt (macOS only) takes one line of at most
+about 1000 bytes; anything longer or with several lines (a key file, JSON) is piped:
 `nazar secret add NAME < file`. Exit codes as for every command: 2 for a bad name or value,
 3 when the prompt was denied, 4 when `config.yaml` has changes waiting for approval.
 
@@ -258,7 +261,7 @@ Not `tool --token "$(nazar get NAME)"` (the value is on the command line for eve
 A tool that saves what it reads in its own store keeps a copy nazar no longer guards.
 
 **MCP servers and other Node or Python programs** use `nazar run --secret NAME -- command…`
-(late-env): the value is never on disk, on a command line or in the startup environment of nazar,
+(late-env; macOS only, see [Linux](#linux)): the value is never on disk, on a command line or in the startup environment of nazar,
 `npx` or the program, and is in the program's environment before its first line runs (its own
 child processes inherit it). The secret needs `late-env` in `deliver` and a rule whose `to:`
 names that exact command line, for example `to: [{command: [npx, -y, "@brave/brave-search-mcp-server"]}]`
@@ -464,6 +467,135 @@ aws sts get-caller-identity --profile dev  # Touch ID once per tab (8 hours at m
   the trust anchor in AWS and remove the profile's `credential_process` line yourself.
 - Nazar UI.app has no AWS tab yet: use the CLI.
 
+## Linux
+
+nazar on Linux is a preview: tested in containers with a software TPM, not yet on real hardware or
+a VM with a vTPM, and `nazar version` says `(Linux preview)`. It is weaker than macOS, above all
+because any program running as you can use your keys and read every secret without a prompt, and
+because whoever holds the machine can use every key from another OS booted on it: use full-disk
+encryption. The [threat model](THREAT-MODEL.md#7-linux-preview) says where, plainly; read it before
+you rely on it.
+
+Everything in this guide applies, except what this section changes. Where the guide says the Secure
+Enclave, read the TPM; Touch ID, your password; the Mac being locked, the screen.
+
+**Install.** You need a desktop session on a systemd distribution (Ubuntu, Fedora, Debian, Arch),
+amd64 or arm64, with a TPM 2.0 at `/dev/tpmrm0`, polkit with a polkit agent (desktops ship one), and
+zenity or kdialog for `dialog`. The desktop must activate systemd's `graphical-session.target` at
+login, which starts the agent: GNOME and KDE do; Xfce, MATE, older Cinnamon, Hyprland, and sway or
+i3 without extra setup do not, and there `nazar install` warns, the agent does not start at the
+next login, and `systemctl --user start nazar-agent.service` starts it. Servers and CI machines
+with no desktop session are not covered yet.
+
+```bash
+brew install atas/tap/nazar-linux
+sudo "$(command -v nazar)" install --system   # once per user, then log out and back in
+nazar install --no-links                      # Homebrew has made the links
+nazar status                                  # the agent answers
+```
+
+Or the release's `install.sh`. It checks the download against `SHA256SUMS`, unpacks it into
+`~/.local/lib/nazar/<version>`, links `~/.local/bin/nazar`, never runs sudo, and prints the two
+commands to run next (there, plain `nazar install`, which makes the other links too):
+
+```bash
+curl -fsSL https://github.com/atas/nazar/releases/latest/download/install.sh | sh
+```
+
+`install --system` installs the polkit action `dev.nazar.authenticate` and the udev rule for
+`/dev/tpmrm0`, adds you to the `tss` group, and makes you an owner of the action. The group gives
+every program running as you the whole TPM, not only nazar's commands: such a program can clear it,
+which destroys every user's nazar keys, secrets and CAs and anything else bound to that TPM
+([threat model 7.16](THREAT-MODEL.md#716-the-release-and-the-machine)); `uninstall --system` keeps
+the membership. The `sudo` line runs a file you own as root, so run it right after an install you
+checked (install.sh checks the tarball against `SHA256SUMS`; `sha256sum` the file yourself before
+running a line a program prints later, or run a root-owned copy). Until you have run it and logged
+in again, `nazar install` refuses, changes nothing and prints the line to run. `nazar install`
+writes the systemd user service `nazar-agent.service`, records both programs' hashes in
+`~/.nazar/install.json`, and starts the agent. Its log is `journalctl --user -u nazar-agent.service`.
+
+**Upgrade.** Run `nazar install` again after every upgrade (`--no-links` from Homebrew). The CLI and
+the agent trust each other by those hashes, so until then a command that reaches the agent says
+`…(it was upgraded or replaced); run nazar install`. If you did not upgrade, find out what replaced
+the file first: this command records whatever is there now. Keys, secrets and config stay, and so do
+kubectl and the AWS CLI: `k8s ca create` and `aws ca create` name the `nazar` you ran them by (the
+link, `~/.local/bin/nazar` or `$(brew --prefix)/bin/nazar`), which the upgrade moves to the new
+version, never the file under `~/.local/lib/nazar/<version>` or the Cellar, which it removes.
+
+**Uninstall.** `nazar uninstall` stops the service, removes it and the links, and keeps `~/.nazar`.
+`sudo "$(command -v nazar)" uninstall --system` removes the polkit action and the udev rule for
+every user of the machine, and keeps the `tss` group and its members.
+
+**Gates.** `login` is your password at the system's own prompt (polkit; a fingerprint where fprintd
+is set up), every time nazar asks. `dialog` is a zenity or kdialog window; it has none of the macOS
+dialog's protections ([threat model 7.4](THREAT-MODEL.md#74-dialog-is-the-desktops-window-not-nazars)),
+so use `login` for what matters. With no graphical session, no polkit agent or no dialog program, a
+gate fails at once with an error (`no polkit authentication agent for this session`,
+`no dialog program: install zenity or kdialog`). The warning for a blocked caller is a desktop
+notification, with the suggested rule in its text.
+
+**Who asks: `app:` and `path:`.** `signed:` and `app:` with `team:` are macOS only: `nazar config
+check` refuses them.
+
+| Matcher | On Linux |
+|---|---|
+| `app:<app-id>` | a desktop app: the file name of its `.desktop` entry without the extension, such as `app:org.gnome.Terminal` or `app:org.kde.konsole`; the executable's hash is pinned on approval |
+| `path:<absolute path>` | any process in the chain running that exact file, as on macOS |
+
+Entries come from `~/.local/share/applications`, `/usr/local/share/applications` and
+`/usr/share/applications`, the first folder winning. A process is the app when the file it was
+started from is the file the entry runs.
+
+- **After an app update** the file is new and the pin is the old hash, so the rule matches nothing:
+  `nazar apps list` says so and names the fix, `nazar trust --app <app-id>`. Find out why the file
+  changed first. An instance of the app that was already running when its file was replaced is not
+  the app until it is started again: it is unknown, or the app above it in the chain, as any non-app
+  process is.
+- **A Flatpak, Snap or script-wrapped app and a `Terminal=true` entry have no `app:` identity.**
+  `nazar trust --app` says why, and `nazar config check` reports the rule with no fix. A `path:` rule
+  names a program's file where there is one to name; `nazar config check` warns when you can write
+  that file.
+- **A terminal with no `app:` identity** gets no rule from `ssh-key create` or `secret add`: the new
+  entry is blocked for every caller until you add a rule.
+- `gate: none` refuses a path under `/bin`, `/sbin` or `/usr`, outside `/usr/local`, as on macOS:
+  those programs sit in almost every chain. The message says "Apple's programs" on Linux too.
+
+**git over HTTPS.** The receiver is a file, not a signature: `git-remote-http` in the folder
+`git --exec-path` prints, such as `--to path:/usr/lib/git-core/git-remote-http` on Debian. Use that
+where the guide shows `signed:apple:com.apple.git-remote-http`. git runs the helper through
+`/bin/sh -c`, which on Debian and Ubuntu (dash) stays between the transport and the helper; nazar
+steps over that shell and the `git credential-nazar` dispatcher, when they are the system's and run
+nothing but the helper, so the transport is the receiver as on macOS.
+
+**AWS.** `credential_process` works run directly (the AWS CLI) and through `sh -c` with its output
+a pipe (the Go SDK, Terraform), where Debian's and Ubuntu's `/bin/sh` stays as the parent: nazar
+accepts that one shell when it holds only the write end it passed on and can't read the output
+([threat model 7.13](THREAT-MODEL.md#713-the-stdout-pipe-check-is-best-effort)). A wrapper that
+copies the output (`| tee`) is refused, as on macOS.
+
+**Signed commits.** `gpg.ssh.program` is the link's absolute path:
+`$(brew --prefix)/bin/nazar-sign-git` from Homebrew, and `$HOME/.local/bin/nazar-sign-git` from
+`install.sh`.
+
+**`--always-ask` and `--only-when-unlocked`** are enforced by nazar, not by a chip: `ssh-key list`
+says `asks every time (nazar)`, a looser rule is refused with `asks on every use (enforced by
+nazar)`, and a key used while locked fails with `the screen is locked; github signs only while it's
+unlocked`. The lock state is what your lock screen tells logind. GNOME and KDE tell it; many
+standalone lockers (swaylock, i3lock, slock) do not, and with those a locked screen counts as
+unlocked. No graphical session counts as locked.
+
+**No hidden prompt.** At a terminal `secret add` refuses with exit 2 and reads nothing, because a
+value typed there would show. Pipe it, from a shell that has the variable:
+`printf '%s' "$NAME" | nazar secret add NAME`, or `nazar secret add NAME < file`.
+
+**`nazar log`** reads `~/.nazar/log/audit.log` (and `audit.log.1`, the older lines; it rotates at
+10 MB), with the same flags and output. It needs no admin account. Any program running as you can
+write to that file, so it can't prove who wrote an entry.
+
+**Not on Linux.** `nazar run` exits 1 and runs nothing, because Linux lets only root watch a
+program's exec: use `helper` or `stdout` delivery (`deliver: [late-env]` gets a warning). `nazar ui`
+exits 1 (`Nazar UI is macOS only`); everything it does is a nazar command.
+
 ## Help and shell completion
 
 `nazar --help` lists every command. `nazar <command> --help` (or `-h`, or `nazar help <command>`)
@@ -497,11 +629,11 @@ ssh-key rule add <key> --apps M[,M] [--to M[,M]] --gate G [--scope S] [--expire 
 ssh-key rule set <key> <n> [--apps ...] [--to ... | --no-to] [--scope S] [--gate G] [--expire D | --no-expire]
 ssh-key rule remove <key> <n>
 ssh-key set <key> [--scope S] [--gate G] [--expire D | --no-expire]
-secret add <name> [--only-when-unlocked]   (the value on stdin or at a hidden prompt; never an argument)
+secret add <name> [--only-when-unlocked]   (the value on stdin or, on macOS, at a hidden prompt; never an argument)
 secret list | rm <name>
 secret rule add|set|remove <name> …   (the flags of ssh-key rule; a secret's own gate stays block)
 get <name>                        (the value on stdout; git uses git-credential-nazar instead)
-run --secret <name> -- <command>  (the program gets the value in its environment; nothing on disk or argv)
+run --secret <name> -- <command>  (the program gets the value in its environment; nothing on disk or argv; macOS only)
 k8s ca create [<context> [<server>]] [--only-when-unlocked]   (asks at a terminal; one Touch ID; adds its kubeconfig entries)
 k8s ca show <context> [--microk8s] | list | forget <context>
 k8s rule add|set|remove <context> …   (the flags of ssh-key rule, without --to or --no-to; the context's own gate stays block)
@@ -517,8 +649,8 @@ config check | config apply
 trust --app <bundle-id>
 log [--follow] [--since 24h] [--target T] [--caller C] [--decision D] | log summary [--since 7d]
 sign-git <ssh-keygen args>        (git's gpg.ssh.program, through ~/.local/bin/nazar-sign-git)
-install [--bin-dir DIR] | uninstall [--bin-dir DIR]
-ui | version
+install [--bin-dir DIR] | uninstall [--bin-dir DIR]   (Linux: also --system, with sudo)
+ui | version                      (ui: macOS only)
 completion bash|zsh|fish          (the shell completion script)
 help [<command>]                  (also <command> --help: a command's flags, values and examples)
 ```

@@ -75,12 +75,18 @@ func (e *env) launch(t *testing.T) {
 func (e *env) relaunch(t *testing.T) {
 	t.Helper()
 	old, done := e.halt, make(chan error, 1)
+	agent := e.d.stager.Active().SSHAgent.Socket // not AgentSocket: no d.mu
 	e.reap = append(e.reap, done)
 	go func() { old(); close(done) }()
-	// The old listener is closed on cancel (its socket file goes with it),
-	// before Run waits for its handlers, so the new daemon can bind the
-	// same path.
-	waitFor(t, func() bool { _, err := os.Stat(e.c.Socket); return err != nil })
+	// The old listeners are closed on cancel (their socket files go with
+	// them), before Run waits for its handlers, so the new daemon can bind
+	// the same paths. They close one after the other, and the new daemon
+	// exits if the agent socket is still in use, so wait for both.
+	waitFor(t, func() bool {
+		_, ctl := os.Stat(e.c.Socket)
+		_, ag := os.Stat(agent)
+		return ctl != nil && ag != nil
+	})
 	e.launch(t)
 }
 
@@ -679,5 +685,29 @@ func TestCreateKeepsSymlinkedConfig(t *testing.T) {
 	}
 	if b, _ := os.ReadFile(real); !strings.Contains(string(b), "k:") {
 		t.Fatalf("symlink target not updated:\n%s", b)
+	}
+}
+
+// Run closes the control listener first and the agent listener after it, so
+// the control socket going away does not mean the agent socket is free. A
+// relaunch in that gap gave a new daemon that answered once on its control
+// socket, then refused the old agent socket as in use and exited, taking its
+// control socket with it (TestRelaunchDuringOpenPromptStaysSuppressed failed
+// with "cannot connect" under load). Holding the old daemon's lock keeps the
+// gap open.
+func TestRelaunchWaitsForTheOldAgentSocket(t *testing.T) {
+	e := start(t)
+	e.d.mu.Lock()
+	time.AfterFunc(300*time.Millisecond, e.d.mu.Unlock)
+	e.relaunch(t)
+	settle()
+	if _, err := os.Stat(e.c.Socket); err != nil {
+		t.Fatalf("the relaunched daemon exited: %v", err)
+	}
+	if e.d.AgentSocket() == "" {
+		t.Fatal("the relaunched daemon has no agent socket")
+	}
+	if _, p := e.apply(t); p != nil && p.ExitCode() == control.ExitUnavailable {
+		t.Fatalf("the relaunched daemon does not answer: %+v", p)
 	}
 }

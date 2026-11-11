@@ -1,0 +1,1 @@
+KERNEL=="tpmrm[0-9]*", SUBSYSTEM=="tpmrm", GROUP="tss", MODE="0660"

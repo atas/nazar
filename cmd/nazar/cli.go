@@ -112,6 +112,9 @@ func (a *app) commands(withCompletion bool) *cobra.Command {
 		}
 	}
 	visit(root)
+	if a.linux {
+		a.linuxHelp(root)
+	}
 	if withCompletion {
 		for _, f := range t.comps {
 			f()
@@ -207,7 +210,7 @@ dialog or block (never none: it applies to every caller; add a rule with --apps 
 	set.Flags().Bool("allow-loosen-access", false, allowUsage)
 	set.Flags().String("if-hash", "", ifHashUsage)
 	t.flagComp(set, "scope", fixed(scopeValues...))
-	t.flagComp(set, "gate", fixed(keyGateValues...))
+	t.flagComp(set, "gate", fixed(a.linuxWords(keyGateValues)...))
 	t.flagComp(set, "expire", noValue)
 	t.flagComp(set, "if-hash", noValue)
 
@@ -273,7 +276,7 @@ func (t *tree) ruleCmd(target ruleTarget, what, example string, names func() []s
 		t.flagComp(c, "apps", a.completeMatchers)
 		t.flagComp(c, "to", a.completeMatchers)
 		t.flagComp(c, "scope", fixed(scopeValues...))
-		t.flagComp(c, "gate", fixed(gateValues...))
+		t.flagComp(c, "gate", fixed(a.gateCompletions()...))
 		t.flagComp(c, "expire", noValue)
 	}
 
@@ -361,6 +364,7 @@ chip refuse the secret while the Mac is locked. To change a value, rm the secret
   printf '%s' "$TOKEN" | nazar secret add GITHUB_PERSONAL_ACCESS_TOKEN
   nazar secret add NOTES < notes.txt
   nazar secret add NOTES                  # typed at a hidden prompt`)
+	add.Short, add.Long, add.Example = a.promptWords(add.Short), a.promptWords(add.Long), a.promptWords(add.Example)
 	add.Flags().Bool("only-when-unlocked", false, "the chip refuses the secret while the Mac is locked")
 
 	list := newCmd("list", "List secrets (names, never values)", `
@@ -601,6 +605,9 @@ CLI inside nazar-agent.app; run it again to repair the setup or after moving the
 touches keys, config or shell startup files.`, "  /Applications/nazar-agent.app/Contents/MacOS/nazar install")
 	c.Flags().String("bin-dir", "~/.local/bin", "where the links go: `DIR`, an absolute path")
 	c.Flags().Bool("no-links", false, "make no links (a package manager links the CLI itself)")
+	if t.a.linux {
+		c.Flags().Bool("system", false, "with sudo, once per user: install what needs root (polkit action, udev rule, tss group)")
+	}
 	t.flagComp(c, "bin-dir", dirValue)
 	return c
 }
@@ -610,6 +617,9 @@ func (t *tree) uninstallCmd() *cobra.Command {
 Stop and remove nazar-agent's LaunchAgent and the links in the bin folder that point into a
 nazar bundle. Keys, config and the Keychain items are kept.`, "  nazar uninstall")
 	c.Flags().String("bin-dir", "~/.local/bin", "where the links are: `DIR`, an absolute path")
+	if t.a.linux {
+		c.Flags().Bool("system", false, "with sudo: remove the polkit action and the udev rule")
+	}
 	t.flagComp(c, "bin-dir", dirValue)
 	return c
 }
@@ -718,7 +728,7 @@ func (a *app) help(args []string) int {
 
 func (a *app) showHelp(root, c *cobra.Command) int {
 	if c == root {
-		fmt.Fprint(a.stdout, usage)
+		fmt.Fprint(a.stdout, a.usageText())
 		return 0
 	}
 	root.SetOut(a.stdout)

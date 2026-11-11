@@ -97,6 +97,8 @@ type Options struct {
 // Daemon is the running core.
 type Daemon struct {
 	o        Options
+	traits   platform.Traits // o.Platform's: what it can match and the words its messages use
+	vault    vaultWords      // how its vault's reasons and remedies are worded
 	stager   *configstage.Stager
 	engine   atomic.Pointer[policy.Engine]
 	trust    *trust.Store
@@ -514,7 +516,7 @@ func New(o Options) (*Daemon, error) {
 	if o.Platform == nil || o.Vault == nil || o.AuditSink == nil || o.Home == "" {
 		return nil, errors.New("daemon: Platform, Vault, AuditSink and Home are required")
 	}
-	d := &Daemon{o: o, resolver: &caller.Resolver{P: o.Platform}, stopping: make(chan struct{})}
+	d := &Daemon{o: o, traits: platform.TraitsOf(o.Platform), vault: vaultWordsOf(platform.TraitsOf(o.Platform)), resolver: &caller.Resolver{P: o.Platform}, stopping: make(chan struct{})}
 	d.prompts = loginPrompts{vault: o.Vault, logf: o.Logf}
 	// The suppression a previous process left behind is honoured before the
 	// first Reload, so a relaunch is not a fresh prompt. Vault items
@@ -531,7 +533,7 @@ func New(o Options) (*Daemon, error) {
 	d.audit = audit.NewLogger(o.AuditSink, audit.Formatter{Home: o.Home}, func(err error) { o.Logf("audit: %v", err) })
 	d.audit.SetObserver(d.uses.record)
 	d.started = o.Now()
-	d.eval = &match.Evaluator{Trust: d.trust, Note: func(m string) { o.Logf("match: %s", m) }}
+	d.eval = &match.Evaluator{Trust: d.trust, Note: func(m string) { o.Logf("match: %s", m) }, PinWord: d.pinWord()}
 	d.cache = approval.New(o.Now, o.Platform.ReleaseApproval)
 	d.keys = keys.NewRegistry(o.Platform, o.Vault, o.PubKeyDir, o.Now)
 	d.secrets = secrets.NewStore(o.Platform, o.Vault, o.Now)
@@ -545,13 +547,28 @@ func New(o Options) (*Daemon, error) {
 	d.prompts.timeout = d.broker.GateTimeout // a claim's record outlasts the prompt it opens
 	d.agent = &sshagent.Server{Keys: d.keys, Broker: d.broker, Resolver: d.resolver,
 		KnownHosts: func() string { return o.KnownHosts }, Logf: o.Logf}
-	env := config.Env{Home: o.Home}
+	env := d.configEnv()
 	// The stager gets the trust store and the platform so that an approved
 	// loosening pins app: teams from the installed apps (spec 4.2). An
 	// approved config it can't read is "none yet": the built-in default
 	// blocks every key and config.yaml waits for the login gate.
 	d.stager = configstage.OpenOrDefault(env, o.Vault, d.trust, o.Platform, d.apply)
 	return d, nil
+}
+
+// configEnv is the config.Env every parse of config.yaml uses: on a
+// platform without code signatures, signed: and app: team: are refused.
+func (d *Daemon) configEnv() config.Env {
+	return config.Env{Home: d.o.Home, NoCodeSigning: !d.traits.CodeSigning}
+}
+
+// pinWord is the Evaluator's PinWord: "" on macOS, whose notes keep their
+// wording, the platform's PinWord elsewhere.
+func (d *Daemon) pinWord() string {
+	if d.traits.PinWord == platform.MacTraits.PinWord {
+		return ""
+	}
+	return d.traits.PinWord
 }
 
 // apply makes c the active config: the policy engine is swapped, the
@@ -562,7 +579,9 @@ func (d *Daemon) apply(c *config.Config) {
 	// copy of the evaluator: an engine already in use keeps its own.
 	ev := *d.eval
 	ev.Command = (&run.Resolver{TrustedPath: c.Defaults.TrustedPath, ShimDirs: d.o.ShimDirs}).Locate
-	d.engine.Store(policy.New(c, &ev))
+	eng := policy.New(c, &ev)
+	eng.NoCodeSigning = !d.traits.CodeSigning
+	d.engine.Store(eng)
 	d.audit.SetFormatter(audit.Formatter{Args: audit.ArgsMode(c.Audit.Args), Home: d.o.Home})
 	d.cache.RetainRules(policy.LiveRuleIDs(c), "config changed")
 	d.mu.Lock()
@@ -776,7 +795,7 @@ func (d *Daemon) autoPrompt(hash string) {
 			why = "nazar does not ask for " + seconds(cool.left) + " after a prompt was denied, not answered, or approved after the file had changed, and does not ask about this change on its own later."
 		default:
 			d.o.Logf("config: cannot record the prompt in the vault, not asking: %v", err)
-			why = "nazar could not record the prompt in the vault (is the login keychain locked?), so it did not ask."
+			why = "nazar could not record the prompt in the vault " + d.vault.cantRecord() + ", so it did not ask."
 		}
 	}
 	d.warnStaged(why)

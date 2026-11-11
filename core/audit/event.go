@@ -1,6 +1,7 @@
 // Package audit formats one line per request decision (spec 4.6) and hands
 // it to a Sink: the macOS unified log in production (subsystem dev.nazar,
-// category audit, default level, public fields), memory or a file in tests.
+// category audit, default level, public fields), a FileSink on Linux, memory or
+// a file in tests.
 //
 // Every caller-derived value (argv, cwd, process names, bundle IDs, signing
 // identities, destinations, operations) is quoted so that it can never forge

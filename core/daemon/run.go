@@ -225,7 +225,7 @@ func (d *Daemon) secretRun(args map[string]string, peer *caller.Chain, out contr
 		return err
 	case info.Broken:
 		d.logOp("secret:"+name, audit.Error, "nazar run: the secret's record is unusable", peer)
-		return control.NewProblem(control.CodeError, "secret %s can't be used: %s; fix: %s", name, secretReason(info), secretRemedy(name))
+		return control.NewProblem(control.CodeError, "secret %s can't be used: %s; fix: %s", name, d.vault.secretReason(info), d.vault.secretRemedy(name))
 	}
 	// Every mount and unmount from here to the write is seen (D12): the
 	// watch is on before the first pin is taken.

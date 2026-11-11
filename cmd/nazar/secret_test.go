@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"io"
 	"maps"
 	"strings"
 	"testing"
@@ -105,6 +106,35 @@ func TestSecretAddPromptsHiddenOnATerminal(t *testing.T) {
 	}
 	if !strings.Contains(h.errb.String(), "value for GH_TOKEN (typing is hidden): ") || strings.Contains(h.out.String()+h.errb.String(), cliValue) {
 		t.Fatalf("stderr %q", h.errb.String())
+	}
+}
+
+// A build with no hidden prompt (off macOS) refuses at a terminal: it never
+// says typing is hidden, reads nothing and sends nothing, and names the
+// piped form, never a file holding the value.
+func TestSecretAddAtATerminalWithNoHiddenPrompt(t *testing.T) {
+	h := newHarness(t)
+	h.secretServer(t)
+	h.a.stdin = strings.NewReader("must not be read")
+	h.a.stdinTerminal = func() bool { return true }
+	h.a.readHidden = nil
+	if code := h.run("secret", "add", "GH_TOKEN"); code != control.ExitUsage {
+		t.Fatalf("exit %d: %s", code, h.errb.String())
+	}
+	if reqs := h.requests(); len(reqs) != 0 {
+		t.Fatalf("sent %v", reqs)
+	}
+	got := h.errb.String()
+	if !strings.Contains(got, `printf '%s' "$NAME" | nazar secret add NAME`) {
+		t.Fatalf("stderr does not name the piped form: %q", got)
+	}
+	for _, bad := range []string{"typing is hidden", "< file", "must not be read"} {
+		if strings.Contains(got, bad) {
+			t.Fatalf("stderr has %q: %q", bad, got)
+		}
+	}
+	if b, _ := io.ReadAll(h.a.stdin); string(b) != "must not be read" {
+		t.Fatalf("stdin was read, %q left", b)
 	}
 }
 

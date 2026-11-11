@@ -136,9 +136,9 @@ func TestCoreOptionsWireExecAndLoaders(t *testing.T) {
 	if o, mac := coreOptions(b, "/tmp/h"), runtime.GOOS == "darwin"; (o.Mounts != nil) != mac {
 		t.Fatalf("Mounts %v on %s: want a mount watch exactly on macOS", o.Mounts, runtime.GOOS)
 	}
-	// So is the stdout check of k8s.credential (package pipes).
-	if o, mac := coreOptions(b, "/tmp/h"), runtime.GOOS == "darwin"; (o.Pipes != nil) != mac {
-		t.Fatalf("Pipes %v on %s: want a stdout check exactly on macOS", o.Pipes, runtime.GOOS)
+	// The stdout check of k8s.credential (package pipes) is on macOS and Linux.
+	if o, has := coreOptions(b, "/tmp/h"), runtime.GOOS == "darwin" || runtime.GOOS == "linux"; (o.Pipes != nil) != has {
+		t.Fatalf("Pipes %v on %s: want a stdout check exactly on macOS and Linux", o.Pipes, runtime.GOOS)
 	}
 	p, free := cfake.NoExecTable(false)
 	nb, err := cbridge.New(p)

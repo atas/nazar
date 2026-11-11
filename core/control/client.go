@@ -29,6 +29,14 @@ type SameUserVerifier struct{}
 
 func (SameUserVerifier) VerifyPeer(c *net.UnixConn) error { return unixsock.RequireSameUser(c) }
 
+// SelfError is a PeerVerifier's refusal that is about this CLI, not about
+// the peer: Do reports Err as it is, without saying the peer is not
+// nazar-agent.
+type SelfError struct{ Err error }
+
+func (e *SelfError) Error() string { return e.Err.Error() }
+func (e *SelfError) Unwrap() error { return e.Err }
+
 // VerifierFunc adapts a function to PeerVerifier.
 type VerifierFunc func(c *net.UnixConn) error
 
@@ -68,6 +76,10 @@ func (c *Client) Do(ctx context.Context, req Request, fn func(kind string, raw j
 		return NewProblem(CodeError, "control: %s is not a unix socket", c.Socket)
 	}
 	if err := c.Verifier.VerifyPeer(uc); err != nil {
+		var self *SelfError
+		if errors.As(err, &self) {
+			return NewProblem(CodeError, "%v", self.Err)
+		}
 		return NewProblem(CodeError, "the process listening on %s is not nazar-agent: %v", c.Socket, err)
 	}
 	stop := context.AfterFunc(ctx, func() { conn.Close() })

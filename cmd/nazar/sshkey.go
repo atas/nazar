@@ -61,23 +61,12 @@ func (a *app) sshKey(args []string) int {
 	return a.usageError("unknown ssh-key subcommand %q", sub)
 }
 
-// alwaysAskMark is how the human views mark a key the chip asks for on
-// every use (SSHKey.UserPresence).
-const alwaysAskMark = "asks every time (chip)"
-
 // onlyWhenUnlockedMark is how the human views mark a key, secret or CA
 // the chip refuses while the Mac is locked (whileLocked false): made with
 // --only-when-unlocked or --always-ask, or before nazar knew the difference.
+// alwaysAskMark, lockedLine and wrongAccess (linuxmode.go) name the
+// platform's words.
 const onlyWhenUnlockedMark = "only when unlocked"
-
-// lockedLine is what the human create outputs say about when the new key
-// works.
-func lockedLine(whileLocked bool) string {
-	if whileLocked {
-		return "works while the Mac is locked too, once you have logged in since it started (fixed for its life)"
-	}
-	return onlyWhenUnlockedMark + ": the chip refuses it while the Mac is locked (fixed for its life)"
-}
 
 // onlyWhenUnlockedFlag is the --only-when-unlocked flag of ssh-key create,
 // secret add and k8s ca create.
@@ -90,13 +79,6 @@ func withOnlyWhenUnlocked(req map[string]string, on bool) map[string]string {
 		req["onlyWhenUnlocked"] = "true"
 	}
 	return req
-}
-
-// wrongAccess is the error for a reply that works while the Mac is locked
-// though --only-when-unlocked asked otherwise (a nazar-agent that ignored
-// the argument): what was made, and how to undo it.
-func wrongAccess(what, undo string) *control.Problem {
-	return control.NewProblem(control.CodeError, "%s works while the Mac is locked, though --only-when-unlocked asked otherwise (is nazar-agent older than this nazar?); don't use it: %s", what, undo)
 }
 
 // sshKeyCreate sends the name and nothing else: nazar-agent writes
@@ -131,18 +113,23 @@ func (a *app) sshKeyCreate(args []string) int {
 		return a.fail(err)
 	}
 	if *alwaysAsk && !k.UserPresence {
-		return a.fail(control.NewProblem(control.CodeError, "SSH key %s was created without chip protection, though --always-ask asked for it (is nazar-agent older than this nazar?); "+
-			"don't use it: nazar ssh-key delete %s", name, name))
+		protection := "chip protection"
+		if a.linux {
+			protection = "a prompt on every use"
+		}
+		return a.fail(control.NewProblem(control.CodeError, "SSH key %s was created without %s, though --always-ask asked for it (is nazar-agent older than this nazar?); "+
+			"don't use it: nazar ssh-key delete %s", name, protection, name))
 	}
 	if *onlyWhenUnlocked && k.WhileLocked {
-		return a.fail(wrongAccess("SSH key "+name, "nazar ssh-key delete "+name))
+		return a.fail(a.wrongAccess("SSH key "+name, "nazar ssh-key delete "+name))
 	}
 	return a.emit(k, func() {
 		fmt.Fprintf(a.stdout, "created SSH key %s (%s)\n", term(k.Name), term(k.Fingerprint))
 		if k.UserPresence {
-			fmt.Fprintf(a.stdout, "%s: Touch ID on every use, enforced by the chip\n", alwaysAskMark)
+			tr := a.traits()
+			fmt.Fprintf(a.stdout, "%s: %s on every use, enforced by %s\n", a.alwaysAskMark(), tr.LoginGate, tr.Enforcer)
 		}
-		fmt.Fprintln(a.stdout, lockedLine(k.WhileLocked))
+		fmt.Fprintln(a.stdout, a.lockedLine(k.WhileLocked))
 		fmt.Fprintf(a.stdout, "public key: %s\n", term(filepath.Join(layout.KeysDir(a.home()), k.Name+".pub")))
 		fmt.Fprintf(a.stdout, "its rules (nazar ssh-key rules %s):\n", term(k.Name))
 		for _, r := range k.Rules {
@@ -174,7 +161,7 @@ func (a *app) printKeyList(l control.SSHKeyList) {
 			rules = fmt.Sprintf("%d", n)
 		}
 		if k.UserPresence {
-			rules += ", " + alwaysAskMark
+			rules += ", " + a.alwaysAskMark()
 		}
 		if !k.WhileLocked && !k.Broken {
 			rules += ", " + onlyWhenUnlockedMark

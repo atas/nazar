@@ -49,7 +49,10 @@ type PinChange struct {
 }
 
 // AppProblem is an app: matcher that matches nothing or whose installed app
-// no longer matches its pin, with the command that fixes it.
+// no longer matches its pin, with the command that fixes it. Fix is empty
+// when no command can: the platform says no process can ever match the id
+// (on Linux an entry that runs a launcher or a script), and the reason
+// says what the entry is instead.
 type AppProblem struct {
 	BundleID, Reason, Fix string
 }
@@ -134,21 +137,53 @@ func appIDs(c *config.Config) []string {
 	return ids
 }
 
-// resolve returns the installed bundle for id when it is validly signed, or
-// a reason it can't be pinned.
-func resolve(apps AppResolver, id string) (platform.AppBundle, string) {
-	b, err := apps.InstalledApp(id)
-	switch {
-	case errors.Is(err, platform.ErrNotFound):
-		return b, "no app with this bundle id is installed"
-	case errors.Is(err, platform.ErrAmbiguous):
-		return b, "several installed apps have this bundle id and they are signed by different teams"
-	case err != nil:
-		return b, "the installed app could not be checked: " + q(err.Error())
-	case b.Code.Team() == "":
-		return b, fmt.Sprintf("the installed app at %s is not validly signed, so it has no team to pin", q(b.Path))
+// pinWords words the pin texts for what a pin records: the signing team
+// on macOS (hash false), the executable's hash on a platform without code
+// signatures (Linux, spec "app: on Linux"), where an update of the app
+// changes the hash and `nazar trust --app` pins the new one.
+type pinWords struct{ hash bool }
+
+// wordsOf is the pinWords of the platform apps is: a platform.Describer
+// whose PinWord is not macOS's pins hashes; anything else is macOS.
+func wordsOf(apps AppResolver) pinWords {
+	if d, ok := apps.(platform.Describer); ok {
+		return pinWords{hash: d.Traits().PinWord != platform.MacTraits.PinWord}
 	}
-	return b, ""
+	return pinWords{}
+}
+
+// resolve returns the installed bundle for id when it is validly signed, or
+// a reason it can't be pinned. unpinnable is set when the platform itself
+// says no process can ever match the id (a platform.NotFoundError; on
+// Linux an entry that runs a launcher or a script, a Terminal=true entry,
+// or an id another entry owns): then no pin, old or new, would help, and
+// `nazar trust --app` would refuse with the same reason. The macOS
+// platform never returns one.
+func resolve(apps AppResolver, id string) (b platform.AppBundle, why string, unpinnable bool) {
+	w := wordsOf(apps)
+	b, err := apps.InstalledApp(id)
+	var nf *platform.NotFoundError
+	switch {
+	case errors.As(err, &nf):
+		// The platform knows why nothing can match this id; "not
+		// installed" would be false.
+		return b, nf.Reason, true
+	case errors.Is(err, platform.ErrNotFound) && w.hash:
+		return b, "no app with this app id is installed", false
+	case errors.Is(err, platform.ErrNotFound):
+		return b, "no app with this bundle id is installed", false
+	case errors.Is(err, platform.ErrAmbiguous) && w.hash:
+		return b, "several installed apps have this app id, with different executables", false
+	case errors.Is(err, platform.ErrAmbiguous):
+		return b, "several installed apps have this bundle id and they are signed by different teams", false
+	case err != nil:
+		return b, "the installed app could not be checked: " + q(err.Error()), false
+	case b.Code.Team() == "" && w.hash:
+		return b, fmt.Sprintf("the installed app at %s has no executable hash to pin", q(b.Path)), false
+	case b.Code.Team() == "":
+		return b, fmt.Sprintf("the installed app at %s is not validly signed, so it has no team to pin", q(b.Path)), false
+	}
+	return b, "", false
 }
 
 // stagePins adds to d the pins an approval of nw would record (d.Pins), each
@@ -170,7 +205,7 @@ func stagePins(pins PinStore, apps AppResolver, old, nw *config.Config, d *Diff)
 		if _, ok := pins.PinnedTeam(id); ok {
 			continue // never changed by a config change
 		}
-		b, why := resolve(apps, id)
+		b, why, _ := resolve(apps, id)
 		if why != "" {
 			continue // stays inactive; AppProblems reports it
 		}
@@ -182,8 +217,16 @@ func stagePins(pins PinStore, apps AppResolver, old, nw *config.Config, d *Diff)
 	if !forced && !d.Loosens() {
 		return
 	}
+	w := wordsOf(apps)
 	for _, c := range cands {
 		d.Pins = append(d.Pins, c)
+		if w.hash {
+			d.Changes = append(d.Changes, fmt.Sprintf("%s: executable hash %s pinned from %s", appTarget(c.BundleID), q(c.Team), q(c.Path)))
+			d.Loosening = append(d.Loosening, Finding{Target: appTarget(c.BundleID), Why: fmt.Sprintf(
+				"trusts the executable at %s (hash %s) as this app from now on; an update of the app changes the hash, and then `%s` pins the new one",
+				q(c.Path), q(c.Team), FixTrustApp(c.BundleID))})
+			continue
+		}
 		d.Changes = append(d.Changes, fmt.Sprintf("%s: team %s pinned from %s", appTarget(c.BundleID), q(c.Team), q(c.Path)))
 		d.Loosening = append(d.Loosening, Finding{Target: appTarget(c.BundleID), Why: fmt.Sprintf(
 			"trusts team %s, the signer of the installed app at %s, as this app from now on", q(c.Team), q(c.Path))})
@@ -193,14 +236,18 @@ func stagePins(pins PinStore, apps AppResolver, old, nw *config.Config, d *Diff)
 // recordPins writes the pins an approval showed. First writer wins: a pin
 // that appeared meanwhile is kept, and reported when it is not the team the
 // user approved.
-func recordPins(pins PinStore, changes []PinChange) error {
+func recordPins(pins PinStore, w pinWords, changes []PinChange) error {
+	what := "team"
+	if w.hash {
+		what = "executable hash"
+	}
 	for _, c := range changes {
 		got, err := pins.Pin(c.BundleID, c.Team)
 		if err != nil {
 			return err
 		}
 		if got != c.Team {
-			return fmt.Errorf("%w: app %s is now pinned to team %s, not the %s that was approved", ErrStale, q(c.BundleID), q(got), q(c.Team))
+			return fmt.Errorf("%w: app %s is now pinned to %s %s, not the %s that was approved", ErrStale, q(c.BundleID), what, q(got), q(c.Team))
 		}
 	}
 	return nil
@@ -210,17 +257,30 @@ func recordPins(pins PinStore, changes []PinChange) error {
 // app: matcher of c that matches nothing (no pin, because the app is not
 // installed, ambiguous or not validly signed, or because it was never
 // approved behind the gate) or whose installed app is signed by another
-// team than the pin, each with the fix. Sorted by bundle id.
+// team than the pin, each with the fix. An id the platform says no process
+// can ever match is reported with its reason whether or not it has a pin
+// (an upgrade can turn a pinned app's program into a wrapper script), and
+// with no fix: `nazar trust --app` would refuse it with the same reason.
+// Sorted by bundle id.
 func AppProblems(c *config.Config, pins PinStore, apps AppResolver) []AppProblem {
 	var out []AppProblem
+	w := wordsOf(apps)
 	for _, id := range appIDs(c) {
-		b, why := resolve(apps, id)
+		b, why, unpinnable := resolve(apps, id)
 		pinned, ok := pins.PinnedTeam(id)
 		switch {
+		case unpinnable:
+			out = append(out, AppProblem{BundleID: id, Reason: why + "; the matcher matches nothing"})
+			continue
+		case ok && why == "" && b.Code.Team() != pinned && w.hash:
+			why = fmt.Sprintf("the installed app's executable at %s has hash %s but %s is pinned, so it does not match (an update of the app replaces its executable; find out why it changed before you run the fix)",
+				q(b.Path), q(b.Code.Team()), q(pinned))
 		case ok && why == "" && b.Code.Team() != pinned:
 			why = fmt.Sprintf("the installed app at %s is signed by team %s but %s is pinned, so it does not match", q(b.Path), q(b.Code.Team()), q(pinned))
 		case ok:
 			continue
+		case why == "" && w.hash:
+			why = fmt.Sprintf("executable hash %s of the installed app at %s is not pinned yet, so the matcher matches nothing", q(b.Code.Team()), q(b.Path))
 		case why == "":
 			why = fmt.Sprintf("team %s of the installed app at %s is not pinned yet, so the matcher matches nothing", q(b.Code.Team()), q(b.Path))
 		default:
@@ -242,10 +302,19 @@ func TrustApp(bundleID string, pins PinStore, apps AppResolver, approve func(Pin
 		return PinChange{}, errors.New("configstage: a bundle id is required")
 	}
 	b, err := apps.InstalledApp(bundleID)
+	var nf *platform.NotFoundError
+	if errors.As(err, &nf) {
+		// The platform's reason, bare: the error it came wrapped in names
+		// the platform and the id again (Linux: "desktop: <id>: ...").
+		return PinChange{}, fmt.Errorf("configstage: app %s can't be pinned: %w", q(bundleID), nf)
+	}
 	if err != nil {
 		return PinChange{}, fmt.Errorf("configstage: app %s can't be pinned: %w", q(bundleID), err)
 	}
 	team := b.Code.Team()
+	if team == "" && wordsOf(apps).hash {
+		return PinChange{}, fmt.Errorf("configstage: app %s can't be pinned: the executable at %s has no hash to pin", q(bundleID), q(b.Path))
+	}
 	if team == "" {
 		return PinChange{}, fmt.Errorf("configstage: app %s can't be pinned: the bundle at %s is not validly signed", q(bundleID), q(b.Path))
 	}

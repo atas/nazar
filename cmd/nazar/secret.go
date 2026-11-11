@@ -82,12 +82,12 @@ func (a *app) secretAdd(args []string) int {
 		return a.fail(err)
 	}
 	if *onlyWhenUnlocked && s.WhileLocked {
-		return a.fail(wrongAccess("secret "+name, "nazar secret rm "+name))
+		return a.fail(a.wrongAccess("secret "+name, "nazar secret rm "+name))
 	}
 	return a.emit(s, func() {
 		fmt.Fprintf(a.stdout, "added secret %s\n", term(s.Name))
 		fmt.Fprintf(a.stdout, "deliver: %s\n", term(strings.Join(s.Deliver, ", ")))
-		fmt.Fprintln(a.stdout, lockedLine(s.WhileLocked))
+		fmt.Fprintln(a.stdout, a.lockedLine(s.WhileLocked))
 		fmt.Fprintln(a.stdout, "its rules (config.yaml, secrets."+term(s.Name)+"):")
 		for _, r := range s.Rules {
 			fmt.Fprintf(a.stdout, "  %s\n", term(r))
@@ -95,13 +95,17 @@ func (a *app) secretAdd(args []string) int {
 	})
 }
 
-// readValue reads a secret's value: one hidden line from a terminal, or
+// readValue reads a secret's value: one hidden line from a terminal (a
+// build with no hidden prompt refuses there and reads nothing), or
 // everything on stdin up to EOF with exactly one trailing newline stripped
 // (`echo "$X" | nazar secret add X`). Empty or over 32 KiB is a usage
 // error, before anything is sent.
 func (a *app) readValue(name string) ([]byte, error) {
 	var v []byte
 	if a.stdinTerminal != nil && a.stdinTerminal() {
+		if a.readHidden == nil {
+			return nil, control.NewProblem(control.CodeUsage, "secret add: %v", errNoHiddenPrompt)
+		}
 		fmt.Fprintf(a.stderr, "value for %s (typing is hidden): ", term(name))
 		line, err := a.readHidden()
 		if err != nil {

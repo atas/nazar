@@ -78,6 +78,7 @@ type Store struct {
 	p   platform.Platform
 	v   platform.Vault
 	now func() time.Time
+	tr  platform.Traits // p's, for the words of its errors
 }
 
 // NewStore returns a store over p and v. A nil now means time.Now.
@@ -85,7 +86,7 @@ func NewStore(p platform.Platform, v platform.Vault, now func() time.Time) *Stor
 	if now == nil {
 		now = time.Now
 	}
-	return &Store{p: p, v: v, now: now}
+	return &Store{p: p, v: v, now: now, tr: platform.TraitsOf(p)}
 }
 
 // Add stores a new secret: a new key-agreement key without Secure Enclave
@@ -109,10 +110,10 @@ func (s *Store) Add(name string, value []byte, access platform.Access) (Info, er
 	}
 	handle, pub, err := s.p.CreateKey(platform.PurposeKeyAgreement, platform.AuthNone, access)
 	if errors.Is(err, platform.ErrLocked) {
-		return Info{}, platform.Locked("secrets: the Mac is locked; a secret that opens only while it's unlocked can't be added now")
+		return Info{}, platform.Locked(fmt.Sprintf("secrets: %s is locked; a secret that opens only while it's unlocked can't be added now", s.tr.Machine))
 	}
 	if err != nil {
-		return Info{}, fmt.Errorf("secrets: create enclave key: %w", err)
+		return Info{}, fmt.Errorf("secrets: create %s key: %w", s.tr.KeyChip(), err)
 	}
 	rec := record{Version: recordVersion, Name: name, Handle: handle, PublicKey: pub,
 		Auth: platform.AuthNone, Access: access, Created: s.now().UTC()}
@@ -155,7 +156,7 @@ func (s *Store) Open(name string, ref platform.ApprovalRef) ([]byte, error) {
 	}
 	v, err := seal.Open(rec.PublicKey, s.agree(rec.Handle, ref), name, rec.Enc, rec.Sealed)
 	if errors.Is(err, platform.ErrLocked) && rec.Access == platform.AccessWhenUnlocked {
-		return nil, platform.Locked(fmt.Sprintf("secrets: the Mac is locked; %s opens only while it's unlocked", name))
+		return nil, platform.Locked(fmt.Sprintf("secrets: %s is locked; %s opens only while it's unlocked", s.tr.Machine, name))
 	}
 	if err != nil {
 		return nil, fmt.Errorf("secrets: open %s: %w", name, err)
@@ -225,7 +226,7 @@ func (s *Store) Delete(name string) error {
 		}
 		if !shared {
 			if err := s.p.DeleteKey(rec.Handle); err != nil && !errors.Is(err, platform.ErrNotFound) {
-				return fmt.Errorf("secrets: delete enclave key: %w", err)
+				return fmt.Errorf("secrets: delete %s key: %w", s.tr.KeyChip(), err)
 			}
 		}
 	}
@@ -246,12 +247,12 @@ func (s *Store) sealTo(rec *record, value []byte) error {
 	}
 	got, err := seal.Open(rec.PublicKey, s.agree(rec.Handle, 0), rec.Name, enc, ct)
 	if err != nil {
-		return fmt.Errorf("secrets: the enclave key of %s does not open what was sealed to it: %w", rec.Name, err)
+		return fmt.Errorf("secrets: the %s key of %s does not open what was sealed to it: %w", s.tr.KeyChip(), rec.Name, err)
 	}
 	same := bytes.Equal(got, value)
 	clear(got)
 	if !same {
-		return fmt.Errorf("secrets: the enclave key of %s opened something else", rec.Name)
+		return fmt.Errorf("secrets: the %s key of %s opened something else", s.tr.KeyChip(), rec.Name)
 	}
 	rec.Enc, rec.Sealed = enc, ct
 	return nil
@@ -297,7 +298,7 @@ func (s *Store) checkFree(name string) error {
 // returns cause, joined with the delete error if that fails too.
 func (s *Store) discard(handle []byte, cause error) error {
 	if err := s.p.DeleteKey(handle); err != nil && !errors.Is(err, platform.ErrNotFound) {
-		return errors.Join(cause, fmt.Errorf("secrets: delete orphaned enclave key: %w", err))
+		return errors.Join(cause, fmt.Errorf("secrets: delete orphaned %s key: %w", s.tr.KeyChip(), err))
 	}
 	return cause
 }
@@ -344,10 +345,10 @@ func (s *Store) load(name string) (record, error) {
 	if err != nil {
 		return record{}, fmt.Errorf("%w: %s%s: %v", ErrUnreadable, VaultPrefix, name, err)
 	}
-	return decode(name, b)
+	return decode(name, b, s.tr.KeyChip())
 }
 
-func decode(name string, b []byte) (record, error) {
+func decode(name string, b []byte, chip string) (record, error) {
 	var rec record
 	if err := json.Unmarshal(b, &rec); err != nil {
 		return record{}, fmt.Errorf("%w: %s: %v", ErrBroken, name, err)
@@ -359,7 +360,7 @@ func decode(name string, b []byte) (record, error) {
 	case rec.Name != name:
 		why = "record name does not match"
 	case len(rec.Handle) == 0:
-		why = "no enclave handle"
+		why = "no " + chip + " handle"
 	case rec.Auth != platform.AuthNone && rec.Auth != platform.AuthUserPresence:
 		why = "unknown auth policy " + rec.Auth.String()
 	case !rec.Access.Valid():

@@ -1,9 +1,9 @@
 # AGENTS.md
 
-Two audiences: agents running on a Mac that **uses** nazar, and agents **working on** this repo.
+Two audiences: agents running on a machine that **uses** nazar, and agents **working on** this repo.
 The full user guide is [docs/CLI.md](docs/CLI.md).
 
-## If you are an agent on a Mac that uses nazar
+## If you are an agent on a machine that uses nazar
 
 nazar guards the user's SSH keys, including from you. A refusal is the user's decision, not a
 bug to work around.
@@ -114,7 +114,9 @@ each would get the value past the rule without a new dialog.
 **Kubernetes**: a refused `kubectl` (`getting credentials: exec: … failed with exit code 3`) is
 the same: do not retry it, edit the kubeconfig, point `KUBECONFIG` elsewhere, or use another
 credential; `nazar log --target k8s:<context> --since 10m` says why, and you can suggest the rule
-(`nazar k8s rule add <context> --apps … --gate dialog --scope session`; there is no `--to`). Never run
+(`nazar k8s rule add <context> --apps … --gate dialog --scope session`; there is no `--to`). On Linux a refusal that says `can't tell who reads the plugin's output; try again` (the same
+for an AWS credential) is not the user's decision: a short-lived program such as `sudo` was in the
+way. Run the command once more, never in a loop. Never run
 `nazar k8s credential` yourself. There is no `clients:` list: the program that runs the plugin
 (kubectl, helm, k9s) gets the credential when the rules allow whoever ran it (or the program
 itself, when launchd started it). A context that still
@@ -136,6 +138,48 @@ there is no `--to`). Exit 1 with an AWS error code (`AccessDeniedException`, `Va
 **Git signing** goes through `nazar-sign-git` (`$(brew --prefix)/bin/nazar-sign-git`, or `~/.local/bin/` from a source build). If a commit fails to sign, report it;
 don't commit with `-c commit.gpgsign=false` unless the user says so.
 
+**On Linux** (a preview) every rule above applies. Keys are in the TPM instead of the Secure
+Enclave, and what differs is this:
+- `login` asks for the user's password at the system's prompt where this file says Touch ID;
+  `dialog` is a zenity or kdialog window. Messages say "your password", "the screen" and "enforced
+  by nazar" (`<name> asks on every use (enforced by nazar)`; `the screen is locked; <name> signs only
+  while it's unlocked`, `decision=error`, which waits for the user to unlock). `no polkit
+  authentication agent for this session` and `no graphical session for the dialog` are errors, not
+  refusals: tell the user, don't retry.
+- Any program running as the user could read `~/.nazar` and use `/dev/tpmrm0` without a prompt. That
+  is a weakness of Linux v1, not a permission. Never use the TPM or the vault files directly, edit
+  anything under `~/.nazar`, set the session's `LockedHint`, or raise a polkit prompt yourself.
+- `--always-ask` and `--only-when-unlocked` are not "fixed for the key's life" on Linux: no chip
+  holds them, they are two bytes of the key's record that nazar reads on every use, and the messages
+  say enforced by nazar from the key's record. Treat them as the user's choice all the same: never
+  edit the record, and suggest a new key where this file says so.
+- Rules match `app:<app-id>` (a desktop entry's file name without `.desktop`, such as
+  `org.gnome.Terminal`; the executable's hash is pinned) or `path:<file>`. `signed:` is macOS only and
+  refused, so suggest for example
+  `nazar ssh-key rule add github --apps app:org.gnome.Terminal --gate login --scope session`. A Flatpak,
+  Snap or script-wrapped app and a `Terminal=true` entry have no `app:` identity: `nazar apps list`
+  says why, with no fix. Don't retry `trust --app`; suggest a `path:` rule and say it is only as safe
+  as who can write that file.
+- An `app:` rule stops matching after every update of the app. Find out why first (the package
+  manager's log; there is no `codesign`), tell the user, and print `nazar trust --app <app-id>` for
+  them only if an update explains it.
+- `nazar run` exits 1 and runs nothing: no rule changes that, and it is not to be got around. Suggest
+  `helper` or `stdout` delivery. `nazar ui` exits 1 too.
+- `secret add` at a terminal exits 2 and reads nothing (there is no hidden prompt). The user pipes the
+  value: `printf '%s' "$NAME" | nazar secret add NAME`.
+- `the agent on the control socket is not the nazar-agent nazar install recorded (it was upgraded or
+  replaced); run nazar install` is setup: tell the user, who runs it once they know what replaced the
+  file. `sudo "$(command -v nazar)" install --system` is always theirs to run: it runs a file they
+  own as root, so they check it against the release's `SHA256SUMS` first (nazar prints that line
+  whenever the TPM can't be opened, which a program could bring about).
+- `nazar log` reads `~/.nazar/log/audit.log`, which any program of the user can write: it is no proof.
+- The git signing link is `$(brew --prefix)/bin/nazar-sign-git` under Homebrew on Linux
+  (`/home/linuxbrew/.linuxbrew/bin/nazar-sign-git` by default) and `$HOME/.local/bin/nazar-sign-git`
+  from `install.sh`.
+
+[docs/CLI.md](docs/CLI.md#linux) has the rest, and [the threat model](docs/THREAT-MODEL.md#7-linux-preview)
+says where Linux is weaker.
+
 ## If you are working on this repo
 
 - Read the spec first: [docs/design/nazar-design.md](docs/design/nazar-design.md),
@@ -143,9 +187,15 @@ don't commit with `-c commit.gpgsign=false` unless the user says so.
   [k8s](docs/design/k8s-design.md)). The threat model is
   [docs/THREAT-MODEL.md](docs/THREAT-MODEL.md).
 - Layout: `core/` (Go core), `cmd/nazar/` (CLI), `bridge/` (Go as a C archive), `macos/` (Swift:
-  Secure Enclave, Keychain, dialogs, nazar-agent.app, Nazar UI.app), `test/integration/`.
+  Secure Enclave, Keychain, dialogs, nazar-agent.app, Nazar UI.app), `core/platform/linux/` and
+  `cmd/nazar-agent/` (Linux), `test/integration/`, `test/linux/`.
 - Test: `make test` (Go, fake platform), `make swift-test`, `make integration`, `make check`
-  (everything). Run one `make check` at a time: it is heavy.
+  (everything; its last stage, `make linux`, needs Docker). Run one `make check` at a time: it is heavy.
+- Linux runs in a container (Docker; the source is mounted read-only and copied inside): `make linux`
+  runs the whole suite, and `make linux-run CMD='<command>'` runs one command there, as the test user,
+  with swtpm, the system bus and polkitd up. Tests that need those carry the build tags
+  `linuxplatform` (`//go:build linux && linuxplatform`) or `linuxe2e` (`linux && linuxe2e`), and exit 1
+  outside the container, never 0.
 - Keep the user surface small: one way to do a thing, short plain messages, no new flags or
   config keys unless they remove complexity elsewhere.
 
@@ -157,4 +207,8 @@ don't commit with `-c commit.gpgsign=false` unless the user says so.
 - Never touch the developer's installed nazar: `~/.nazar`, an older install's `~/.config/nazar`, the installed apps,
   the LaunchAgents `dev.nazar` / `dev.nazar.agent`.
 - Sign builds ad hoc (`codesign -s -`) only.
+- On a Linux machine, tests and agents never touch `/dev/tpm*`, the host's polkit, its system or
+  session bus, the `systemctl --user` unit `nazar-agent.service`, or `~/.nazar`, and never run zenity
+  or kdialog or show a notification on a real desktop. All of that goes through seams and the
+  container.
 - Never weaken or skip a test to make it pass; a security fix comes with a test that fails without it.

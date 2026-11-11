@@ -22,7 +22,8 @@ import (
 // variable read, and that is data nazar-agent checks. The control socket is
 // <home from the user database>/.nazar/run/control.sock, never $HOME or
 // NAZAR_CONTROL_SOCKET; no config file is read; the agent is checked by its
-// signature, never with NAZAR_TEST_PEER.
+// signature (on Linux by its hash, against the record in that same home),
+// never with NAZAR_TEST_PEER.
 func (a *app) k8sCredential(args []string) int {
 	if a.json {
 		return a.credFail(control.NewProblem(control.CodeUsage, "k8s credential takes no --json: its stdout is the ExecCredential"))
@@ -86,8 +87,8 @@ var testCredentialSocket func(getenv func(string) string) (string, bool)
 
 // credentialClient is the control client of k8s credential and aws
 // credential: the socket in
-// the passwd home, the agent checked by its signature (a.verifier only in
-// tests).
+// the passwd home, the agent checked by its signature, or on Linux by its
+// hash against the record in that same home (a.verifier only in tests).
 func (a *app) credentialClient() (*control.Client, error) {
 	if testCredentialSocket != nil {
 		if s, ok := testCredentialSocket(a.getenv); ok {
@@ -102,9 +103,10 @@ func (a *app) credentialClient() (*control.Client, error) {
 	if home == "" || !filepath.IsAbs(home) {
 		return nil, errNoHome
 	}
+	home = filepath.Clean(home)
 	v := a.verifier
 	if v == nil {
-		v = a.agentVerifier()
+		v = a.agentVerifier(home)
 	}
-	return &control.Client{Socket: layout.ControlSocket(filepath.Clean(home)), Verifier: v}, nil
+	return &control.Client{Socket: layout.ControlSocket(home), Verifier: v}, nil
 }

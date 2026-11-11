@@ -66,7 +66,7 @@ jobs:
             - name: make test
               run: make test
 
-            # The shipping platform is macOS (spec section 2 has no Linux build), yet this job is
+            # The main platform is macOS, yet this job is
             # Linux, so core/unixsock/peer_darwin.go (LOCAL_PEERCRED, the kernel-verified peer UID
             # check) would otherwise never be compiled or vetted in CI. Cross-vet both OSes.
             - name: make vet-cross
@@ -80,12 +80,37 @@ jobs:
 
             - name: Integration tests not run here
               if: runner.os != 'macOS'
-              run: echo "::notice title=Integration tests not run::test/integration needs macOS (Apple-signed /usr/bin/ssh, /usr/sbin/sshd). Run 'make integration' on a Mac, or set the repo variable CI_INTEGRATION_RUNNER (see the integration job)."
+              run: echo "::notice title=Integration tests not run here::test/integration runs in the linux job's container (make linux runs make integration there), not on this runner. Its fake platform stands in for a Mac, so that run covers real ssh, sshd and git on Linux, not Linux gating. On a Mac, run 'make integration', or set the repo variable CI_INTEGRATION_RUNNER (see the integration job)."
 
-    # The integration tests drive Apple's /usr/bin/ssh, /usr/sbin/sshd, ssh-add, ssh-keygen and
-    # git against nazar-testd, and several cases pin the Apple code signature of ssh
-    # (signed: {team: apple, id: com.apple.openssh}). Their TestMain exits 0 on anything but
-    # darwin, so on Linux they would "pass" without running a single test.
+    # The Linux platform suite in the test container (test/linux): swtpm, the container's own
+    # system bus with polkitd, OpenSSH, git and kubectl, run as an unprivileged user. `make linux`
+    # builds the image and runs everything in it; the checkout is mounted read-only.
+    linux:
+        name: Linux platform (container)
+        runs-on: ubuntu-latest
+        timeout-minutes: 45
+        steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                  persist-credentials: false
+            # The procfs tests make unprivileged user and mount namespaces, and fail in the image
+            # without them. `make linux` turns seccomp and AppArmor off in the container; an Ubuntu
+            # host also restricts them with this sysctl, where it has it.
+            - name: Allow unprivileged user namespaces
+              run: |
+                  if [ -e /proc/sys/kernel/apparmor_restrict_unprivileged_userns ]; then
+                      sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+                  fi
+            - name: make linux
+              run: make linux
+
+    # The integration tests drive /usr/bin/ssh, /usr/sbin/sshd, ssh-add, ssh-keygen and git
+    # against nazar-testd. On a Mac those are Apple's, and several cases pin the Apple code
+    # signature of ssh (signed: {team: apple, id: com.apple.openssh}). Their TestMain exits 0 on
+    # anything but darwin and Linux inside the test container, so on a bare Linux runner they
+    # would "pass" without running a single test. The linux job runs them in the container
+    # against the image's OpenSSH and git. nazar-testd's fake platform has macOS traits there
+    # too, so that run covers real ssh, sshd and git on Linux, not Linux gating or wording.
     #
     # They were proven only on macOS 27 with OpenSSH 10.3 and git 2.55. Whether
     # GitHub's macos-latest image (its OpenSSH, /usr/sbin/sshd and signature) passes is

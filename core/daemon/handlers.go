@@ -114,7 +114,7 @@ func (d *Daemon) sshKey(info keys.Info) control.SSHKey {
 		Created: info.Created, Rules: []string{}, Usable: !info.Broken,
 	}
 	if info.Broken {
-		k.UnusableReason, k.Remedy = keyReason(info), keyRemedy(info.Name)
+		k.UnusableReason, k.Remedy = d.vault.keyReason(info), d.vault.keyRemedy(info.Name)
 	}
 	shown, staged := d.shownConfig()
 	policy := entryRules(config.KeyEntry(info.Name), shown, staged)
@@ -211,9 +211,24 @@ func createAccess(auth platform.AuthPolicy, onlyWhenUnlocked bool) platform.Acce
 	return platform.AccessAfterFirstUnlock
 }
 
+// linuxAccessBy is the parenthesis of accessLine off macOS, where macOS
+// says "fixed for the key's life": the choice is two plain bytes of the
+// key's record that nazar reads on every use (THREAT-MODEL 7.3, 7.11), so
+// the line says who enforces it and never that it is fixed.
+const linuxAccessBy = "enforced by %s from the key's record"
+
 // accessLine is the create prompt's line on when the new key works: the
 // one place a person learns it at creation.
-func accessLine(a platform.Access) string {
+func accessLine(a platform.Access, tr platform.Traits) string {
+	if tr.Enforcer != platform.MacTraits.Enforcer {
+		// Off macOS no chip keeps a key from working before the first
+		// login: only nazar's check of the screen lock is promised.
+		by := fmt.Sprintf(linuxAccessBy, tr.Enforcer)
+		if a == platform.AccessWhenUnlocked {
+			return fmt.Sprintf("works only while %s is unlocked (%s)", tr.Machine, by)
+		}
+		return fmt.Sprintf("works while %s is locked too (%s)", tr.Machine, by)
+	}
 	if a == platform.AccessWhenUnlocked {
 		return "works only while the Mac is unlocked; fixed for the key's life"
 	}
@@ -241,11 +256,11 @@ func terminalApp(peer *caller.Chain) string {
 
 // presenceLine is the prompt line that says whether the chip itself guards
 // the key (spec 4.5): the one place a person learns it at creation.
-func presenceLine(auth platform.AuthPolicy) string {
+func presenceLine(auth platform.AuthPolicy, tr platform.Traits) string {
 	if auth == platform.AuthUserPresence {
-		return "Touch ID on every use, enforced by the chip: this key can never get a session, dialog or no-prompt rule"
+		return fmt.Sprintf("%s on every use, enforced by %s: this key can never get a session, dialog or no-prompt rule", tr.LoginGate, tr.Enforcer)
 	}
-	return "Secure Enclave user presence: off (a rule remembers approvals or allows a dialog, or no rule allows the key yet; nazar's gates are the check)"
+	return tr.Presence() + ": off (a rule remembers approvals or allows a dialog, or no rule allows the key yet; nazar's gates are the check)"
 }
 
 // sshKeyCreate creates a key and, for a name config.yaml has no entry for,
@@ -272,6 +287,9 @@ func (d *Daemon) sshKeyCreate(args map[string]string, peer *caller.Chain, out co
 		return control.NewProblem(control.CodeUsage, "invalid key name %q", name)
 	}
 	if args["scope"] != "" || args["gate"] != "" {
+		if d.traits.Enforcer != platform.MacTraits.Enforcer {
+			return control.NewProblem(control.CodeUsage, "ssh-key create takes no --scope or --gate: the key's rules decide its protection (for a key that asks on every use: `nazar ssh-key create %s --always-ask`)", name)
+		}
 		return control.NewProblem(control.CodeUsage, "ssh-key create takes no --scope or --gate: the key's rules decide its protection (for a key the chip itself guards: `nazar ssh-key create %s --always-ask`)", name)
 	}
 	alwaysAsk := false
@@ -339,10 +357,10 @@ func (d *Daemon) sshKeyCreate(args map[string]string, peer *caller.Chain, out co
 	if !ok {
 		// The entry above always fits; never create a key that was asked
 		// to be always-ask without it.
-		return control.NewProblem(control.CodeError, "ssh-key create --always-ask: the new entry for %q would not fit a key the chip asks for on every use; nothing was changed", name)
+		return control.NewProblem(control.CodeError, "ssh-key create --always-ask: the new entry for %q would not fit a key %s asks for on every use; nothing was changed", name, d.traits.Enforcer)
 	}
 	access := createAccess(auth, onlyWhenUnlocked)
-	lines = append(lines, accessLine(access), presenceLine(auth))
+	lines = append(lines, accessLine(access, d.traits), presenceLine(auth, d.traits))
 	target := "ssh:" + name
 	cl, err := d.claimLogin(target, "create key", "not created", peer)
 	if err != nil {
@@ -435,7 +453,7 @@ func (d *Daemon) sshKeyRecreate(name string, alwaysAsk, onlyWhenUnlocked bool, p
 	dec, reason := d.broker.Login(platform.Prompt{
 		Title: fmt.Sprintf("Create SSH key %q?", name),
 		Lines: []string{"for its entry in config.yaml (ssh_agent.keys." + name + "; its rules are kept)",
-			"a previous key of this name stops working", accessLine(access), presenceLine(auth)},
+			"a previous key of this name stops working", accessLine(access, d.traits), presenceLine(auth, d.traits)},
 		Reason: fmt.Sprintf("create SSH key %q", name),
 	})
 	d.logOp(target, dec, "create key again: "+reason, peer)
@@ -481,8 +499,7 @@ func (d *Daemon) sshKeyDelete(name string, peer *caller.Chain, out control.Emitt
 		return err
 	}
 	if info.Unreadable {
-		return control.NewProblem(control.CodeError, "SSH key %s can't be deleted by this nazar-agent: its Keychain item belongs to another signature of the agent, "+
-			"or the login keychain is locked; nothing was changed. To fix it: %s", name, keyRemedy(name))
+		return control.NewProblem(control.CodeError, "SSH key %s can't be deleted by this nazar-agent: %s; nothing was changed. To fix it: %s", name, d.vault.unreadable(), d.vault.keyRemedy(name))
 	}
 	cl, err := d.claimLogin("ssh:"+name, "delete key", "not deleted", peer)
 	if err != nil {
@@ -491,7 +508,7 @@ func (d *Daemon) sshKeyDelete(name string, peer *caller.Chain, out control.Emitt
 	defer cl.close() // any return before cl.end(true) is an approval that applied nothing
 	dec, reason := d.broker.Login(platform.Prompt{
 		Title:  fmt.Sprintf("Delete SSH key %q?", name),
-		Lines:  []string{info.Fingerprint, "The key is destroyed in the Secure Enclave. This can't be undone."},
+		Lines:  []string{info.Fingerprint, d.deleted(fmt.Sprintf("The key is destroyed in %s. This can't be undone.", d.traits.Chip), "key")},
 		Reason: fmt.Sprintf("delete SSH key %q", name),
 	})
 	d.logOp("ssh:"+name, dec, "delete key: "+reason, peer)
@@ -596,6 +613,23 @@ func (d *Daemon) revoke(args map[string]string, peer *caller.Chain, out control.
 	return out.Emit(control.RevokeResult{TypeMeta: control.Meta(control.KindRevokeResult), Revoked: n})
 }
 
+// ScreenLocked ends every remembered approval (session and app scopes
+// alike), as `nazar revoke --all` does, and writes one audit line for the
+// lock. A host that wants approvals to end when the screen locks calls it
+// from the platform's OnScreenLock: nazar-agent on Linux does (the design's
+// "Weaker than macOS" 3: an unknown lock state counts as a lock there, so
+// approvals that end at lock end). The daemon registers nothing for the
+// lock itself, so a host that does not call it keeps its sessions across
+// a lock, as nazar-agent.app on macOS always has. Safe from any goroutine.
+func (d *Daemon) ScreenLocked() {
+	n := d.cache.RevokeAll("screen locked")
+	word := "approvals"
+	if n == 1 {
+		word = "approval"
+	}
+	d.logOp("approvals", audit.Allowed, fmt.Sprintf("screen locked: %d %s ended", n, word), nil)
+}
+
 func problems(ps config.Problems) []control.ConfigProblem {
 	var out []control.ConfigProblem
 	for _, p := range ps {
@@ -606,13 +640,17 @@ func problems(ps config.Problems) []control.ConfigProblem {
 
 // appProblems reports, as warnings, every app: matcher of the active
 // config that matches nothing or whose installed app no longer matches its
-// pin, each naming the fix (`nazar trust --app <id>`). The bundle id comes
-// from the config file and is quoted ASCII-only, as configstage does.
+// pin, each naming the fix (`nazar trust --app <id>`) when a command is
+// one (configstage.AppProblem.Fix). The bundle id comes from the config
+// file and is quoted ASCII-only, as configstage does.
 func (d *Daemon) appProblems() []control.ConfigProblem {
 	var out []control.ConfigProblem
 	for _, p := range configstage.AppProblems(d.stager.Active(), d.trust, d.o.Platform) {
-		out = append(out, control.ConfigProblem{Severity: string(config.SevWarning),
-			Message: fmt.Sprintf("app: %s: %s; run `%s`", strconv.QuoteToASCII(p.BundleID), p.Reason, p.Fix)})
+		msg := fmt.Sprintf("app: %s: %s", strconv.QuoteToASCII(p.BundleID), p.Reason)
+		if p.Fix != "" {
+			msg += fmt.Sprintf("; run `%s`", p.Fix)
+		}
+		out = append(out, control.ConfigProblem{Severity: string(config.SevWarning), Message: msg})
 	}
 	return out
 }
@@ -665,7 +703,7 @@ func (d *Daemon) configCheck(out control.Emitter) error {
 		// The key advice judges the file checked (a staged edit included),
 		// not the active config; an invalid file gets its errors only, and
 		// a missing one blocks every key, so neither has gates to compare.
-		c, probs := config.Parse(data, config.Env{Home: d.o.Home})
+		c, probs := config.Parse(data, d.configEnv())
 		res.Valid = !probs.HasErrors()
 		res.Problems = append(res.Problems, d.fileProblems(c, probs)...)
 	}
@@ -751,7 +789,7 @@ func (d *Daemon) configApply(want string, peer *caller.Chain, out control.Emitte
 		return control.NewProblem(control.CodeStaged, "%v (the change stays staged)", err)
 	default:
 		d.logOp("config", audit.Error, "config prompt not shown: the vault refused to record it", peer)
-		return control.NewProblem(control.CodeError, "cannot record the config prompt in the vault (is the login keychain locked?): %v; the change stays staged", err)
+		return control.NewProblem(control.CodeError, "cannot record the config prompt in the vault %s: %v; the change stays staged", d.vault.cantRecord(), err)
 	}
 	// approveStaged ends the claim on every way out.
 	applied, shown, err := d.approveStagedShown(cl, p.Config.Hash, peer, false)
@@ -803,7 +841,7 @@ func (d *Daemon) claimLogin(target, op, refusal string, peer *caller.Chain) (*lo
 		return nil, control.NewProblem(control.CodeRefused, "%s: %v", refusal, err)
 	default:
 		d.logOp(target, audit.Error, op+": prompt not shown: the vault refused to record it", peer)
-		return nil, control.NewProblem(control.CodeError, "cannot record the approval prompt in the vault (is the login keychain locked?): %v", err)
+		return nil, control.NewProblem(control.CodeError, "cannot record the approval prompt in the vault %s: %v", d.vault.cantRecord(), err)
 	}
 }
 
@@ -817,7 +855,7 @@ func (d *Daemon) claimLogin(target, op, refusal string, peer *caller.Chain) (*lo
 // the line as well.
 func (d *Daemon) trustApp(bundleID string, peer *caller.Chain, out control.Emitter) error {
 	if bundleID == "" {
-		return control.NewProblem(control.CodeUsage, "trust --app needs a bundle id")
+		return control.NewProblem(control.CodeUsage, "trust --app needs %s", map[bool]string{true: "a bundle id", false: "an app id"}[d.traits.CodeSigning])
 	}
 	q := strconv.QuoteToASCII
 	var reason string
@@ -832,18 +870,29 @@ func (d *Daemon) trustApp(bundleID string, peer *caller.Chain, out control.Emitt
 	}()
 	approved := false
 	c, err := configstage.TrustApp(bundleID, d.trust, d.o.Platform, func(c configstage.PinChange) (bool, error) {
+		pin := d.traits.PinWord // "team" on macOS, "executable hash" on Linux
 		lines := []string{
 			"app: " + q(c.BundleID),
 			"installed at " + q(c.Path),
-			"signed by team " + q(c.Team),
 		}
-		if c.Old != "" {
+		if d.traits.CodeSigning {
+			lines = append(lines, "signed by team "+q(c.Team))
+		} else {
+			lines = append(lines, pin+" "+q(c.Team))
+		}
+		if c.Old != "" && d.traits.CodeSigning {
 			lines = append(lines, "replaces the pinned team "+q(c.Old)+": the app's signer changed")
+		} else if c.Old != "" {
+			lines = append(lines, "replaces the pinned "+pin+" "+q(c.Old)+": the app's executable changed")
 		}
-		lines = append(lines, "app: matchers for this bundle id will match only this team from now on.")
-		title := fmt.Sprintf("Trust team %s as app %s?", q(c.Team), q(c.BundleID))
+		if d.traits.CodeSigning {
+			lines = append(lines, "app: matchers for this bundle id will match only this team from now on.")
+		} else {
+			lines = append(lines, "app: matchers for this app will match only this executable from now on.")
+		}
+		title := fmt.Sprintf("Trust %s %s as app %s?", pin, q(c.Team), q(c.BundleID))
 		if c.Old != "" {
-			title = fmt.Sprintf("Replace the pinned team of app %s (%s → %s)?", q(c.BundleID), q(c.Old), q(c.Team))
+			title = fmt.Sprintf("Replace the pinned %s of app %s (%s → %s)?", pin, q(c.BundleID), q(c.Old), q(c.Team))
 		}
 		claim, err := d.claimLogin("app:"+c.BundleID, "trust --app", "not pinned", peer)
 		if err != nil {
@@ -852,7 +901,7 @@ func (d *Daemon) trustApp(bundleID string, peer *caller.Chain, out control.Emitt
 		cl = claim
 		var dec audit.Decision
 		dec, reason = d.broker.Login(platform.Prompt{Title: title, Lines: lines, Reason: "trust app " + q(c.BundleID)})
-		d.logOp("app:"+c.BundleID, dec, fmt.Sprintf("trust --app: pin team %s: %s", q(c.Team), reason), peer)
+		d.logOp("app:"+c.BundleID, dec, fmt.Sprintf("trust --app: pin %s %s: %s", pin, q(c.Team), reason), peer)
 		approved = dec == audit.Approved
 		if !approved {
 			cl.end(false)
@@ -863,13 +912,23 @@ func (d *Daemon) trustApp(bundleID string, peer *caller.Chain, out control.Emitt
 		d.logOp("app:"+c.BundleID, audit.Error, "trust --app: approved, but the pin could not be written: "+err.Error(), peer)
 	}
 	var refused *control.Problem
+	var notFound *platform.NotFoundError
 	switch {
 	case errors.As(err, &refused):
 		return refused // the throttle refused the prompt
 	case errors.Is(err, configstage.ErrNotApproved):
 		return control.NewProblem(control.CodeRefused, "not pinned: %s", reason)
+	case errors.As(err, &notFound):
+		// The platform says why no process can match this id (Linux: a
+		// desktop entry that runs a launcher or a script); the reason's
+		// values are quoted by the platform.
+		return control.NewProblem(control.CodeError, "app %s can't be pinned: %s", q(bundleID), notFound.Reason)
+	case errors.Is(err, platform.ErrNotFound) && !d.traits.CodeSigning:
+		return control.NewProblem(control.CodeError, "app %s can't be pinned: no app with this app id is installed", q(bundleID))
 	case errors.Is(err, platform.ErrNotFound):
 		return control.NewProblem(control.CodeError, "app %s can't be pinned: no app with this bundle id is installed", q(bundleID))
+	case errors.Is(err, platform.ErrAmbiguous) && !d.traits.CodeSigning:
+		return control.NewProblem(control.CodeError, "app %s can't be pinned: several installed apps have this app id, with different executables", q(bundleID))
 	case errors.Is(err, platform.ErrAmbiguous):
 		return control.NewProblem(control.CodeError, "app %s can't be pinned: several installed apps have this bundle id and they are signed by different teams", q(bundleID))
 	case err != nil:

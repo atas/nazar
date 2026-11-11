@@ -216,3 +216,48 @@ func TestAWSRuleIDsTrackTheEntry(t *testing.T) {
 		t.Fatal("another entry's change must not drop dev's approvals")
 	}
 }
+
+// Check 1 of an AWS credential on a platform without code signatures
+// (Engine.NoCodeSigning): the program that ran nazar is identified by its
+// file and hash, as for k8s (TestEvaluateK8sNoCodeSigningIdentifiesByPathAndHash).
+func TestEvaluateAWSNoCodeSigningIdentifiesByPathAndHash(t *testing.T) {
+	en := newAWSEnv(t)
+	en.e.NoCodeSigning = true
+	tf := terraformProc()
+	tf.Code = platform.CodeIdentity{CDHash: []byte{0x01}}
+	tab := en.f.ITermTab(platform.ProcessRef{}, tf, awsCredProc("dev"))
+	out := en.e.EvaluateAWS("dev", en.r.Resolve(tab.Peer()))
+	if out.Reason == ReasonAWSCaller || out.Policy.Gate == config.GateBlock || out.Receiver != "path:"+tf.Path+"#01" {
+		t.Fatalf("an unsigned terraform with a hash, no code signing: %+v", out)
+	}
+	noHash := terraformProc()
+	noHash.Code = platform.CodeIdentity{}
+	tab = en.f.ITermTab(platform.ProcessRef{}, noHash, awsCredProc("dev"))
+	if out := en.e.EvaluateAWS("dev", en.r.Resolve(tab.Peer())); out.Reason != ReasonAWSCaller || out.Receiver != "" {
+		t.Fatalf("no hash: %+v", out)
+	}
+}
+
+// Two programs that each run credential_process through the system's
+// `sh -c` (dash stays as the CLI's parent) do not share a receiver: an
+// approval given to one's shell is not the other's.
+func TestEvaluateAWSShellHopKeepsTheProgramInTheReceiver(t *testing.T) {
+	en := newAWSEnv(t)
+	en.e.NoCodeSigning = true
+	sh := fake.Proc{Path: "/usr/bin/dash", Args: []string{"/bin/sh", "-c", "nazar aws credential dev"}, Code: platform.CodeIdentity{CDHash: []byte{0xda}}}
+	tf := terraformProc()
+	tf.Code = platform.CodeIdentity{CDHash: []byte{0x01}}
+	other := fake.Proc{Path: "/home/u/bin/other", Args: []string{"other"}, Code: platform.CodeIdentity{CDHash: []byte{0x02}}}
+	recv := func(program fake.Proc) string {
+		tab := en.f.ITermTab(platform.ProcessRef{}, program, sh, awsCredProc("dev"))
+		out := en.e.EvaluateAWS("dev", en.r.Resolve(tab.Peer()))
+		if out.Reason == ReasonAWSCaller || out.Receiver == "" {
+			t.Fatalf("%s through sh: %+v", program.Path, out)
+		}
+		return out.Receiver
+	}
+	a, b := recv(tf), recv(other)
+	if a == b || !strings.Contains(a, tf.Path) || !strings.Contains(b, other.Path) || !strings.Contains(a, "/usr/bin/dash") {
+		t.Fatalf("receivers %q and %q: each must name its program and the shell", a, b)
+	}
+}

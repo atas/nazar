@@ -411,7 +411,7 @@ func (a *app) printEdit(r control.ConfigEdit) {
 
 // applyHint is how a change left staged in config.yaml is approved later.
 func (a *app) applyHint() {
-	fmt.Fprintln(a.stdout, "run `nazar config apply` to approve it (Touch ID / Watch / password)")
+	fmt.Fprintf(a.stdout, "run `nazar config apply` to approve it (%s)\n", a.approval())
 }
 
 // refusedLoosening reports nazar-agent's refusal of an edit sent without
@@ -436,9 +436,9 @@ func (a *app) refusedLoosening(p *control.Problem) int {
 		fmt.Fprintf(a.stderr, "  %s\n", term(d))
 	}
 	if fix == "" {
-		fmt.Fprintf(a.stderr, "to make it, add %s to the command (Touch ID)\n", allowLoosenFlag)
+		fmt.Fprintf(a.stderr, "to make it, add %s to the command (%s)\n", allowLoosenFlag, a.traits().LoginGate)
 	} else {
-		fmt.Fprintf(a.stderr, "to make it, run (Touch ID):\n  %s\n", term(fix))
+		fmt.Fprintf(a.stderr, "to make it, run (%s):\n  %s\n", a.traits().LoginGate, term(fix))
 	}
 	return p.ExitCode()
 }
@@ -509,7 +509,7 @@ func (a *app) approveEdit(hash string) int {
 		return a.fail(control.NewProblem(control.CodeError, "nazar-agent staged the change under an invalid hash; run `nazar config check`"))
 	}
 	if !a.json {
-		fmt.Fprintln(a.stdout, "approve it with Touch ID / Watch / password")
+		fmt.Fprintf(a.stdout, "approve it with %s\n", a.approval())
 	}
 	var d control.ConfigDiff
 	if err := a.call(control.CmdConfigApply, map[string]string{"hash": hash}, control.KindConfigDiff, &d); err != nil {
@@ -568,7 +568,10 @@ func (a *app) apps(args []string) int {
 				if what == "" {
 					what = matcherText(e.Matcher)
 				}
-				fmt.Fprintf(a.stdout, "%s: %s\n  fix: %s\n", term(what), term(e.Problem), term(e.Fix))
+				fmt.Fprintf(a.stdout, "%s: %s\n", term(what), term(e.Problem))
+				if e.Fix != "" {
+					fmt.Fprintf(a.stdout, "  fix: %s\n", term(e.Fix))
+				}
 			}
 		}
 	})
@@ -612,6 +615,9 @@ var errUINotInstalled = errors.New("no app with bundle id " + uiBundleID)
 // ordinary app the user may or may not have installed: when Launch
 // Services knows none, exit 1 with how to install it.
 func (a *app) ui(args []string) int {
+	if a.linux {
+		return a.fail(control.NewProblem(control.CodeError, "ui: %s", uiOnLinux))
+	}
 	if _, err := a.parse(a.flags("ui"), args, 0); err != nil {
 		return a.fail(err)
 	}

@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/atas/nazar/core/layout"
+	"github.com/atas/nazar/internal/linuxtest/container"
 )
 
 var bin string // directory with nazar, nazar-testd and the nazar-sign-git link
@@ -59,8 +60,8 @@ func trackDir(d string) {
 }
 
 func TestMain(m *testing.M) {
-	if runtime.GOOS != "darwin" {
-		fmt.Println("integration tests need macOS")
+	if why := skipReason(runtime.GOOS, container.Check); why != "" {
+		fmt.Println(why)
 		os.Exit(0)
 	}
 	dir, err := os.MkdirTemp("/tmp", "nzbin")
@@ -106,6 +107,26 @@ func TestMain(m *testing.M) {
 		}
 	}
 	os.Exit(code)
+}
+
+// skipReason says why the suite does not run on goos, or "" when it does:
+// on macOS always, on Linux only inside nazar's test container (check is
+// container.Check), where sshd, ssh and git are the image's and nothing
+// reaches the host. Anywhere else the suite prints the reason and exits 0,
+// as it always has. nazar-testd's fake platform has macOS traits on Linux
+// too (signed: rules pass, say), so a Linux run covers real ssh, sshd and
+// git, not Linux gating or wording.
+func skipReason(goos string, check func() error) string {
+	switch goos {
+	case "darwin":
+		return ""
+	case "linux":
+		if err := check(); err != nil {
+			return "integration tests need macOS, or Linux in the test container: " + err.Error()
+		}
+		return ""
+	}
+	return "integration tests need macOS"
 }
 
 // world is one test's home directory, nazar-testd and (optionally) sshd.
@@ -185,11 +206,36 @@ func (w *world) waitFor(cond func() bool) {
 	}
 }
 
+// worldPath is the PATH of a world's commands. The test image keeps kubectl
+// in /usr/local/bin (test/linux/Dockerfile), where a Mac's PATH here does not
+// look.
+func worldPath(goos string) string {
+	if goos == "linux" {
+		return "/usr/bin:/bin:/usr/sbin:/usr/local/bin"
+	}
+	return "/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin"
+}
+
+// findKubectl is the kubectl a world with this PATH runs, or "".
+func findKubectl(path string) string {
+	for _, d := range filepath.SplitList(path) {
+		if fi, err := os.Stat(filepath.Join(d, "kubectl")); err == nil && fi.Mode().IsRegular() {
+			return filepath.Join(d, "kubectl")
+		}
+	}
+	return ""
+}
+
+// noKubectlFails says whether a run with no kubectl is a failure rather than
+// an untested step: a Mac may not have it, but on Linux the suite runs only in
+// the test image, which installs it (skipReason).
+func noKubectlFails(goos string) bool { return goos == "linux" }
+
 // env is a minimal environment: HOME is the test home, no SSH_AUTH_SOCK,
 // git ignores the user's global and system config, both control sockets
 // are the world's and KUBECONFIG is in the world's home, never ~/.kube.
 func (w *world) env(extra ...string) []string {
-	return append([]string{"HOME=" + w.home, "PATH=/usr/bin:/bin:/usr/sbin:/opt/homebrew/bin", "NAZAR_CONTROL_SOCKET=" + w.ctlSock,
+	return append([]string{"HOME=" + w.home, "PATH=" + worldPath(runtime.GOOS), "NAZAR_CONTROL_SOCKET=" + w.ctlSock,
 		"NAZAR_TEST_CONTROL_SOCKET=" + w.ctlSock, "KUBECONFIG=" + filepath.Join(w.home, "kubeconfig"),
 		"NAZAR_TEST_PEER=same-user", // nazar-testd is not Nazar.app
 		"GIT_CONFIG_GLOBAL=/dev/null", "GIT_CONFIG_NOSYSTEM=1", "LC_ALL=C"}, extra...)
@@ -423,6 +469,15 @@ func (w *world) startSSHD(pubFile string) *sshd {
 	cfg := fmt.Sprintf("Port %d\nListenAddress 127.0.0.1\nHostKey %s\nAuthorizedKeysFile %s\nPidFile %s\nStrictModes no\nUsePAM no\nPasswordAuthentication no\nKbdInteractiveAuthentication no\nAllowAgentForwarding yes\nPerSourcePenalties no\nMaxStartups 100\n",
 		port, hostKey, filepath.Join(d, "authorized_keys"), filepath.Join(d, "sshd.pid"))
 	os.WriteFile(filepath.Join(d, "sshd_config"), []byte(cfg), 0o600)
+	// PerSourcePenalties (OpenSSH 9.8 and later) keeps sshd from refusing
+	// the tests' many quick logins. An older sshd (Debian bookworm's 9.2,
+	// in the Linux test image) has no penalties and rejects the option as
+	// unknown, so there it goes.
+	if out, err := exec.Command("/usr/sbin/sshd", "-t", "-f", filepath.Join(d, "sshd_config")).CombinedOutput(); err != nil &&
+		bytes.Contains(out, []byte("Bad configuration option: PerSourcePenalties")) {
+		cfg = strings.Replace(cfg, "PerSourcePenalties no\n", "", 1)
+		os.WriteFile(filepath.Join(d, "sshd_config"), []byte(cfg), 0o600)
+	}
 	s := &sshd{port: port, hostPub: hostKey + ".pub", cmd: exec.Command("/usr/sbin/sshd", "-D", "-e", "-f", filepath.Join(d, "sshd_config"))}
 	logf, _ := os.Create(filepath.Join(d, "sshd.log"))
 	s.cmd.Stdout, s.cmd.Stderr = logf, logf

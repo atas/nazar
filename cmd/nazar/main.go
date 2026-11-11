@@ -7,22 +7,27 @@ package main
 import (
 	"os"
 	"path/filepath"
+	"runtime"
 	"syscall"
 )
 
 func main() {
 	a := &app{
+		linux:  runtime.GOOS == "linux",
 		stdout: os.Stdout,
 		stderr: os.Stderr,
 		stdin:  os.Stdin,
 
 		stdinTerminal: stdinIsTerminal,
 		readHidden:    readHiddenLine,
-		getenv:        os.Getenv,
-		environ:       os.Environ,
-		exec:          syscall.Exec,
-		resetForExec:  resetForExec,
-		runLog:        runSystemLog,
+
+		noHiddenPrompt: noHiddenPromptOn(runtime.GOOS),
+
+		getenv:       os.Getenv,
+		environ:      os.Environ,
+		exec:         syscall.Exec,
+		resetForExec: resetForExec,
+		runLog:       runSystemLog,
 
 		executable:   selfExecutable,
 		plistProgram: plistProgram,
@@ -35,6 +40,15 @@ func main() {
 		output:       runOutput,
 		accountHome:  accountHome,
 		selfPath:     os.Executable,
+	}
+	if a.linux {
+		a.systemctl = runSystemctl
+		a.sysCommand = runSysCommand
+		a.tpmAccess = openTPM
+		a.euid = os.Geteuid
+		// /proc/self/exe is the versioned file an upgrade removes; the
+		// kubeconfig and ~/.aws/config must name the link the user ran.
+		a.selfPath = linuxSelfPath
 	}
 	// Installed as gpg.ssh.program via a symlink named nazar-sign-git
 	// (spike S8): git's arguments are ssh-keygen's, never nazar's.

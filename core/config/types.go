@@ -430,9 +430,12 @@ func ValidSecretName(name string) bool {
 
 var appNameRE = regexp.MustCompile(`^[a-z0-9][a-z0-9._-]{0,63}$`)
 
-// Env is what Parse needs from the environment.
+// Env is what Parse needs from the environment. NoCodeSigning: the
+// platform has no code signatures (Linux), so signed: and app: with team:
+// are refused (they could never match) and late-env is warned about.
 type Env struct {
-	Home string
+	Home          string
+	NoCodeSigning bool
 }
 
 // Default returns the built-in config used when no approved config exists:

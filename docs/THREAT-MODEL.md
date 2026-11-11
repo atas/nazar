@@ -12,6 +12,8 @@ decide a request for one (4.1, 4.4, 4.6, 4.8, 5.9, 5.11), and from Milestone 12 
 noted where they change the picture; the secrets design's section 10 and the k8s design's section 10
 are their full lists.
 
+Sections 1 to 6 describe macOS. Linux is a preview and weaker: [section 7](#7-linux-preview).
+
 ## 1. Assets
 
 | Asset | Why it matters |
@@ -693,8 +695,9 @@ does not cover:
   service lookups. The value's path uses none. A receiver that checks TLS through macOS's trust
   service would ask the caller's stand-in; Node and Python check against their own CA files by
   default.
-- **Linux.** The Linux process seams and the Linux CLI reset are test grade: no Linux agent
-  ships. There a parent can ptrace the receiver or inject fds after the sweep.
+- **Linux.** `nazar run` refuses on Linux (7.5). The Linux process seams and the Linux CLI reset
+  that its tests use are test grade: there a parent can ptrace the receiver or inject fds after
+  the sweep.
 - **Signals in the last microseconds.** A signal that arrives between the CLI's reset and
   `execve` goes to the CLI's own handler and is dropped.
 
@@ -1010,3 +1013,324 @@ the signed request and the reply; Amazon's roots are not pinned (aws design 9.4)
   installed path, to forge `nazar log` entries (4.9).
 - Only the publisher (or, for a developer's own builds, the developer) can sign with their team's
   certificate (4.10).
+
+## 7. Linux (preview)
+
+Sections 1 to 6 describe macOS. nazar on Linux is the same core on other parts: keys in the TPM
+(`/dev/tpmrm0`), `login` through polkit, `dialog` through zenity or kdialog, callers from `/proc`,
+and a file vault under `~/.nazar`. It is a preview: tested in containers with a software TPM, not
+yet on real hardware or a VM with a vTPM.
+
+**The short version: on Linux v1, nazar does not stop hostile code running as you.** Such code can
+use your keys and read every secret without a prompt (7.2). What still holds:
+
+- **A key can't be copied off the machine.** It is made inside the TPM (`fixedTPM`, `fixedParent`,
+  `sensitiveDataOrigin`) and only its TPM-wrapped blob is stored. It does not need you, though:
+  whoever holds the machine can use every key from another OS booted on it, unless the disk is
+  encrypted (7.17).
+- **Other users stay out**, root apart: the sockets accept only your own UID, and the vault is 0600
+  files in a 0700 folder. Three things do cross between users: a `dialog` prompt's text is on a
+  command line any local user can read (7.4); any process of a user who installed nazar can raise a
+  spoofed polkit prompt on another user's session (7.12); and any process of a user who ran
+  `install --system` can send the TPM any command, clearing it included, which destroys every
+  user's nazar keys, secrets and CAs (7.16).
+- **Programs that go through the agent get its rules**: `ssh`, `git`, `kubectl`, and an AI agent or
+  a mistaken script that asks instead of attacking. They get the match, the gate, the block warning
+  and the log line, as on macOS.
+
+So these parts of the macOS model do not hold on Linux as written: 4.1 (no Keychain ACL), 4.3 and
+4.10 (no signatures), 4.5 (the dialog's protections), 4.6 (approvals), 4.8 (no chip enforces
+anything), 4.9 (the log's sender check) and 5.16's pipe guarantee. Each difference is below.
+
+### 7.1 App identity: no code signatures
+
+Rules match a program's file path, whether root owns the file or not. `config check` refuses
+`signed:` and warns when you can write a `path:` file, as on macOS. A `path:` or `app:` match says
+which file the process was started from, not which code runs in it: a library the caller loads
+through `LD_PRELOAD`, a same-user debugger, or a script run by an allowed interpreter runs other
+code under the same path and hash. On macOS, platform binaries and hardened apps refuse injected
+libraries and the kernel enforces the CDHash per page. 7.15 says what this means for `app:`.
+
+### 7.2 No isolation between programs of the same user (accepted for v1)
+
+Linux has no per-app keychain ACL. Any process running as you can read the blob files and use
+`/dev/tpmrm0`, so it can sign with any key, unseal any secret and mint Kubernetes and AWS
+credentials without a nazar prompt. A secret is sealed to a TPM key with an empty auth value, so
+such a process opens the value in plain text and sends it anywhere; store on Linux only what you
+would store in a file of your own. The `tss` group that `install --system` puts you in passes every
+TPM command on, not only nazar's, so such a process can also clear the TPM and destroy every user's
+keys, secrets and CAs (7.16). It can also replace the programs themselves when they are under
+your home (`~/.local/lib/nazar`, a Homebrew prefix you own), and the unit file in
+`~/.config/systemd/user`. The TPM still means no key can be copied off the machine, though it does
+not stop whoever holds the machine (7.17). The planned fix is the agent as its own system user (v2).
+
+The one-time step `sudo <nazar> install --system` runs, as root, a file you can write: install.sh
+names `~/.local/lib/nazar/<version>/nazar`, the formula `<prefix>/opt/nazar-linux/bin/nazar`
+under a Homebrew prefix you own, and the docs `"$(command -v nazar)"`, which trusts your `PATH`. The
+CLI and the agent print the same line whenever the TPM cannot be opened. So hostile code running as
+you can replace the file, make the TPM look inaccessible so that nazar prints the line again, and
+get root the next time you follow it. That is one of two routes nazar opens from your account to
+root (section 2 scopes the attacker as "without root"); the other is the password the `login` gate
+has you type (7.18). Run it right after an install you
+checked, from the file install.sh verified against `SHA256SUMS`, or from a root-owned copy of it,
+and check the file (`sha256sum` against the release's `SHA256SUMS`) before running a line a program
+printed later.
+
+### 7.3 `--always-ask` and `--only-when-unlocked` are enforced by nazar, not by a chip
+
+The TPM key has no user-presence requirement and an empty auth value: the prompt on every use and
+the lock check are nazar's own, and the messages say "enforced by nazar". Code that loads the blob
+itself (7.2) meets neither.
+
+The lock state is what the desktop's lock screen reports to logind, the session's `LockedHint`.
+
+- GNOME and KDE report it. Many standalone lockers (swaylock, i3lock, slock, most xscreensaver
+  setups) do not, and with those a locked screen counts as unlocked.
+- logind does not keep the hint across its own restart, which a package upgrade may cause: a screen
+  locked before the restart reads as unlocked until the desktop reports a lock again.
+- Any program running as you can set the hint (logind takes `SetLockedHint` from the session's
+  owner), so it does not stop such a program.
+- The display session is trusted for its hint while it is not the active one on its seat (you
+  switched to another VT or another user's session): switched away is not locked.
+- No graphical session (a tty or ssh login only) counts as locked. So does a desktop started from a
+  console login (`startx`, or a compositor run from a tty), because logind keeps the tty session's
+  type for it; the error then says you have no graphical session.
+- Lock events come from the same place (logind's `Lock` signal and `LockedHint`), and an unknown
+  state counts as locked there too: when logind leaves the bus, the display session goes away or a
+  lookup fails, the agent treats it as a lock once, so approvals that end at lock end.
+- The desktop's screensaver interface (`org.freedesktop.ScreenSaver`, `ActiveChanged`) is not
+  consulted in v1. This is a known gap.
+
+What is said here about logind, GNOME, KDE and the standalone lockers is read from their
+documentation and sources, not run: no test talks to a real logind (the suite uses
+`internal/linuxtest/fakelogind`), and no real desktop or locker has been locked against the agent
+(7.6).
+
+### 7.4 `dialog` is the desktop's window, not nazar's
+
+The window is zenity or kdialog, so it has none of the protections of 4.5. Allow is live from the
+first frame, with no 1 s arming and no grey-out when focus leaves. The keyboard can answer it: Enter
+sits on Deny, but Tab and Space reach Allow. A synthetic click is not told from a real one.
+
+On X11 any same-user program can click Allow (XTest). On Wayland the agent runs the program
+Wayland-only (`DISPLAY` and `XAUTHORITY` dropped, `GDK_BACKEND` and `QT_QPA_PLATFORM` set to
+`wayland`), so it never opens as an XWayland window; a program that cannot use Wayland fails closed,
+as an error.
+
+The prompt's text is on the program's command line, which every local user can read through `/proc`
+unless the machine mounts it with `hidepid`. It holds no secret values: the lines are redacted, and
+the caller's own command line is public already.
+
+Most of this is read from zenity's and kdialog's sources and documentation, not run: no test runs
+either program (the suite uses `internal/linuxtest/fakedialog` in its place, and the test image
+installs neither). That covers where Enter and Tab land, the exact argv (`--no-markup`,
+`--default-cancel`, kdialog's `--yes-label`), the Wayland-only fall-through, and the list of
+stderr lines the agent reads as "could not open the display" rather than as a denial. One part was
+run by hand, outside the suite: zenity 3 (Debian 12) prints `cannot open display` and zenity 4
+(Fedora 41) prints `Failed to open display` for a dead display, both with exit 1, and kdialog on
+both accepted the argv. A toolkit that words a display failure some other way makes the agent log
+a denial for a window nobody saw: it still fails closed, but as the user's decision.
+
+### 7.5 No `nazar run`
+
+Late-env delivery needs to watch a process exec, which Linux allows only to root, so the command
+refuses with exit 1 and runs nothing. `helper` and `stdout` deliveries work. A secret with
+`deliver: [late-env]` gets a warning from `config check`.
+
+### 7.6 Unverified on real hardware, or against a real desktop
+
+The automated tests stand in for everything outside the container. They use a software TPM
+(swtpm), private D-Bus buses, a test polkit agent (`internal/linuxtest/polkitagent`), a fake logind
+(`fakelogind`), a fake notification server (`fakenotify`) and a fake dialog program (`fakedialog`)
+in place of zenity or kdialog; the test image installs neither dialog program and runs no display
+server. So no test has ever run real zenity or kdialog, locked a real desktop, shown a notification
+on one, or answered a polkit prompt through a desktop's own agent (polkit-gnome, KDE's, mate-polkit,
+lxpolkit). What 7.3, 7.4, 7.9 and 7.12 say about those programs is read from their sources and
+documentation, except where a section says it was run. The TPM chip is one open question of
+several: Linux releases are labelled preview until someone runs one on a real machine or a VM with a
+vTPM and through the desktop checks of docs/RELEASING.md, step 5.
+
+### 7.7 A caller that execs after connecting
+
+It keeps its PID, start time and pidfd, so the agent reports it as the program it became, with that
+program's hash and path. So any program running as you can pass as any program it can run, the nazar
+CLI included: connect, hand the socket to a child, and exec the allowed program in the connected
+process while the child talks on the socket. On macOS the audit token's pidversion changes on exec,
+so a connection opened before the exec is refused: its chain is unknown. A session (the root
+process's PID and start time, which an exec keeps) survives an exec on both platforms, so approvals
+scoped to it carry over on both. Only processes running as you reach the agent's sockets (7.2).
+
+### 7.8 Peer identity before Linux 6.5
+
+Without `SO_PEERPIDFD` (Debian 12 and Ubuntu 22.04 on their stock kernels; `uname -r` below 6.5), a
+peer that exited and was reaped between connecting and being looked up can have its PID reused, and
+the agent reports the new holder as the peer, unless the holder started after the lookup began (that
+one is refused). From 6.5 the kernel's pidfd of the peer rules it out.
+
+### 7.9 The block warning is a desktop notification
+
+What the desktop does with one is the desktop's setting. A desktop that shows notifications on its
+lock screen shows the warning (the blocked program, its redacted command line, its folder and the
+suggested rule) to anyone at the keyboard, and one that keeps a notification history keeps it there.
+The macOS window does neither. The lines are redacted the same way on both platforms.
+
+### 7.10 No hidden prompt in `secret add`
+
+At a terminal it refuses, reads nothing and names `printf '%s' "$NAME" | nazar secret add NAME`,
+because a value typed there would show. On macOS the value can be typed at a prompt with echo off.
+Piped input works the same on both.
+
+### 7.11 The approval is not a barrier to code running as you
+
+Same-user code can also rewrite the vault's approved config, the pins and the remembered helpers,
+the install record (`~/.nazar/install.json`) that makes the CLI and the agent trust each other, and
+the key records in the vault. A key record holds, in two plain bytes, whether the key asks on every
+use and whether it works while the screen is locked (7.3): the TPM object is the same for every key,
+so code that rewrites those bytes makes the agent itself stop asking and stop checking the lock, with
+the same key and no prompt. The CLI therefore never says "fixed for its life" on Linux; it says the
+choice is enforced by nazar from the key's record. So on Linux v1 the approval itself is not a
+barrier to code running as you: a change that loosens access asks when it goes through nazar, and
+code that goes around nazar is not asked. 4.6 does not hold against it.
+
+### 7.12 A polkit prompt can be spoofed by any process of a user who owns the action
+
+The password prompt shows the request only through the action's `$(nazar.prompt)` detail. polkitd
+takes a detail only from root or an owner of the action, and a group owner does not count, so
+`install --system` makes each installing user an owner of `dev.nazar.authenticate`.
+
+polkit lets an action owner pass details and check subjects of other identities. So any process of
+that user can raise a polkit prompt that looks like nazar's, with text of its own, on the user's own
+desktop. On a machine with several users it can also raise one on another user's session, whether
+or not that user installed nazar, and learn whether it was answered. For a prompt raised that way
+on another user's session, the password goes through that user's own agent to PAM and never
+reaches the process that asked, so there it is spoofing and prompt spam, not password theft. On the
+attacker's own user's desktop that limit does not hold: a process that draws its own window instead
+of raising a polkit check sees what is typed (7.18). nazar's own check refuses a subject that is
+root or another user, which protects nazar's use of the gate but cannot restrict any other process.
+
+Verified in the test container: polkitd accepts an owner's check, with details, on a subject of
+another identity (root, approved with no prompt; a non-root user, answered with a challenge). Not
+run: a second real session with its own agent, so the prompt appearing there is unverified.
+
+The prompt's text is also at the mercy of how the desktop's agent renders it. Some agents set the
+message as markup with no escaping (read in their source: mate-polkit wraps it in Pango markup,
+LXQt's agent sets it on a Qt label whose format is auto-detected), so a caller's command line
+holding `<` or `&` could hide or restyle the other lines, or leave the message empty, while the
+user still approves with a password. nazar replaces `<`, `>` and `&` in the text it hands to polkit
+with their fullwidth look-alikes, which a markup agent and a plain-text agent both show as
+characters. What remains: not run on a real desktop; GNOME Shell's and KDE's agents were not
+checked; an agent that reads some other syntax is not covered.
+
+polkit's own rules sit above all of this. A rule an administrator puts in `/etc/polkit-1/rules.d`
+that answers yes for `dev.nazar.authenticate` approves the `login` gate with no prompt at all.
+Only root can write one, and root holds the machine anyway (7.17).
+
+### 7.13 The stdout pipe check is best effort
+
+The check of 5.16 runs from `/proc`. It is a snapshot: Linux has no reference count to read, and an
+fd in flight over a socket or in a process with hidden fds is invisible. Any same-user process can
+open either end of the pipe through `/proc/<pid>/fd` after the check, including between the
+mint-time check and the write. So 5.16's "only kubectl can copy the read end and only the CLI the
+write end" is macOS only. On Linux the check stops a relay (`tee`), whose copy is there when it
+looks, but not a same-user reader, such as a kubeconfig wrapper's background job.
+
+A process whose fds the check cannot read (another user's, or one that is not dumpable, such as
+`sudo` or `ssh`) is skipped when it started before the CLI, or before the shell that ran it: the
+pipe was made for that program, so nothing older has it by inheritance. That is
+about inheritance only: a program of yours can make its own fds unreadable
+(`prctl(PR_SET_DUMPABLE, 0)`), and if it started earlier and took the read end through `/proc`, the
+check skips it and passes. One that started later
+could hold the pipe, so the check fails closed for as long as it runs, and the refusal says "can't
+tell who reads the output; try again".
+
+For an AWS credential the check also accepts one process between the CLI and the program that
+reads: the `/bin/sh -c` the Go SDK and Terraform run `credential_process` through, which on Debian
+and Ubuntu is dash and stays as the CLI's parent (macOS's sh execs the command, so the question
+never arises there). It is accepted only when it is the system's sh, dash or bash under `/bin` or
+`/usr/bin` run with `-c` and one argument, and when its fd 1 is the same pipe's write end and the
+pipe has no other holder than the CLI's fd 1 and one read end in the program: at the check the
+shell holds no read end. Like any process of yours it could open one afterwards through `/proc`
+(the first paragraph of this section), and the check does not read the shell's command. That
+shell is then "the program that ran nazar" in the rules' sense (check 1 and the log line), and the
+rules are judged on what called it, the SDK program included. The approval's receiver is the shell
+together with the program that ran it, so an approval given to Terraform's shell is not another
+program's. An `sh -c` whose command pipes the output elsewhere is refused as before.
+
+### 7.14 `nazar log` has no sender check
+
+It reads `~/.nazar/log/audit.log` (and `audit.log.1`), a file any program running as you can write.
+There is no image or sender to check, as 4.9 has on macOS, so the log can't prove who wrote an
+entry, and same-user code can forge or remove lines.
+
+### 7.15 An `app:` pin is a hash, and an id means what the desktop entries say
+
+- **A pin breaks on every app update.** It is the SHA-256 of the app's executable, so a package
+  upgrade stops the `app:` rule matching (it fails closed) until `nazar trust --app <id>` pins the
+  new file. Find out why the file changed before you approve that prompt.
+- **An id's meaning comes from the desktop entries**, and your own `~/.local/share/applications`
+  wins over the system's. Same-user code can register an id for a file of its own, or take a system
+  id over, and `nazar trust --app` then pins that file. The prompt names the file it pins, and the
+  pin keeps only the hash, with no path, so a byte-identical copy of the app elsewhere matches too.
+  This is the same-user trust of 7.2, not a new escalation.
+
+### 7.16 The release and the machine
+
+- Linux builds are not signed the way Apple notarizes. A release has `SHA256SUMS`, which comes from
+  the same place as the files it checks: it catches a damaged download, not a compromised release.
+- Keys are tied to one TPM. Clearing the TPM, or moving the disk to another machine, loses every
+  key, secret and CA, as a new Mac does (5.10).
+- **Any user who ran `install --system` can clear the TPM.** It puts the installing user in the
+  `tss` group, which the udev rule gives `/dev/tpmrm0`, and the resource manager passes on every TPM
+  command, not only nazar's. With the lockout authorization empty, as it ships on most machines,
+  `TPM2_Clear` wipes the storage hierarchy: every user's nazar keys, secrets and CAs, and anything
+  else bound to that TPM (LUKS slots enrolled with `systemd-cryptenroll` or Clevis, a dual-boot
+  BitLocker). So any process of such a user can destroy what every other user of the machine keeps
+  in nazar. The same empty authorization could set an owner password, which would stop every later
+  `CreatePrimary` (not run). Verified in the test container on the software TPM as the unprivileged
+  test user: clear returned no error and the storage root key's name changed; not run on real
+  hardware, and it holds wherever the lockout authorization is empty and clear is not disabled.
+  `uninstall --system` leaves the membership (the group is not nazar's), so the power stays.
+
+### 7.17 Whoever holds the machine holds the keys
+
+A key is made under the TPM's storage root key with an empty authorization value and no policy: no
+password, no PCR binding, nothing that ties its use to a login. Its wrapped blob is a plain file in
+`~/.nazar/vault`, and `TestKeysSurviveReopen` shows the blobs load again under the same storage root
+key. So whoever holds a laptop whose disk is not encrypted can boot another OS on it, read the vault
+off the disk and, on the same TPM, sign with every key, open every secret and mint credentials from
+every CA, with no password and no login. The live-boot route itself was not run; it follows from the
+templates and the blob format.
+
+This is the opposite of macOS 5.17, where nothing works before the first login after a restart and a
+key made with `--only-when-unlocked` is refused by the chip while the Mac is locked: on Linux neither
+holds, and `--only-when-unlocked` is nazar's own check of the session (7.3), which a stranger's OS
+never makes. The summary's "a key can't be copied off the machine" is about copying, not about use:
+the key is tied to the machine, and the machine is enough. Full-disk encryption (LUKS, as the
+installers of Ubuntu, Fedora and Debian offer it) is required for a lost or stolen machine to give
+up nothing; nazar does not check for it.
+
+### 7.18 The `login` gate has you type your password into a window a program could draw
+
+On macOS the `login` prompt is drawn by the OS (4.5), and Touch ID gives nothing a program can
+reuse. On Linux the `login` gate is polkit, and the window that asks is the desktop's
+authentication agent, a user-space program running as you (polkit-gnome, KDE's agent, mate-polkit,
+lxpolkit, GNOME Shell's). What it asks for is your account password, which on most desktops is
+also your sudo password. nazar makes you type it often: at every `login` prompt, and for every
+staged change.
+
+So any program running as you can show a window that looks like that prompt, timed to a real
+nazar request (it can see the request coming: the agent's socket, `~/.nazar`, the process list),
+with `zenity --password`, its own toolkit, or by registering an authentication agent of its own once
+the desktop's killable agent is gone (polkitd takes an agent from any process of the session; only
+the agent's own prompt is drawn by it). On X11 it may also read the keystrokes of the real prompt.
+The password it captures gives it sudo, so root, the TPM and every other user's data. This is a
+second route from your account to root (7.2 has the other), and it holds whichever user owns the
+polkit action. It is also why 7.12's "not password theft" applies only to a prompt raised on another
+user's session.
+
+What helps: fprintd, where the machine has a fingerprint reader (the prompt then asks for a touch,
+and a fake window gains nothing); a sudo password that is not the login password (`sudo` with a
+separate PAM stack, or an admin account other than your own); and reading the prompt before
+typing, as the macOS model asks of the `dialog` gate. None of this was run against a real desktop:
+the test agent (`internal/linuxtest/polkitagent`) registers as an unprivileged user for one subject
+in the container, and replacing a real session's agent was not tried.

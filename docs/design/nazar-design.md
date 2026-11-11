@@ -1591,7 +1591,7 @@ operation, and supplies its own payload summary for the dialog:
   process chains, approvals, denials, timeouts, process exits and screen locks, so all rule and
   scope logic is tested with `go test` and no Mac hardware or dialogs.
 - **Platform conformance tests:** one suite in Go runs against every real `Platform`
-  implementation (macOS now, Linux later), so both behave the same at the interface. Tests that
+  implementation (macOS, and Linux as a preview), so both behave the same at the interface. Tests that
   need a person to answer a dialog are tagged and run manually. Its `keys/k8s-ca` subtest
   (Milestone 12) makes a Kubernetes CA on the platform's own keys (`CAStore.Create`, one client
   certificate from `Issue`, both verified with the CA's public key alone, then

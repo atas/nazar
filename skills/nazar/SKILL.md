@@ -1,8 +1,9 @@
 ---
 name: nazar
 description: >-
-  Set up and use nazar, the macOS agent that keeps SSH keys, API tokens, Kubernetes CAs and AWS
-  CAs in the Secure Enclave and asks the user (Touch ID or an Allow dialog) before each use. Use
+  Set up and use nazar, the macOS agent (Linux as a preview) that keeps SSH keys, API tokens,
+  Kubernetes CAs and AWS CAs in the Secure Enclave (on Linux, the TPM) and asks the user (Touch ID,
+  a password on Linux, or an Allow dialog) before each use. Use
   when the user mentions nazar, SSH keys or ssh-agent, ~/.ssh/config, git commit signing, git or
   ssh failing with "agent refused operation" or "Permission denied (publickey)", API keys or
   tokens for scripts, git HTTPS or MCP servers, kubectl credentials for a self-managed cluster,
@@ -18,11 +19,12 @@ the Secure Enclave and never leave it; it also keeps API tokens and Kubernetes a
 same way. Each key, secret, context or aws entry has rules: which apps may use it (by code signature, never by name),
 how one approves (`login`: Touch ID / Watch / password, `dialog`: Allow/Deny, `none`, `block`)
 and how long an approval lasts (`use`, `session`, `app`). Callers no rule covers are blocked.
+On Linux (a preview) the keys are in the TPM and some of this differs: see "On Linux" below.
 
 **Trust model: you drive the commands; the user approves.** Every approval is a prompt on the
 user's screen, and nazar guards the keys from you too. A refusal is the user's decision, not a
 bug to work around. The full rules are in
-[AGENTS.md](https://github.com/atas/nazar/blob/main/AGENTS.md) ("If you are an agent on a Mac
+[AGENTS.md](https://github.com/atas/nazar/blob/main/AGENTS.md) ("If you are an agent on a machine
 that uses nazar"), which wins where this file and it differ; the user guide is
 [docs/CLI.md](https://github.com/atas/nazar/blob/main/docs/CLI.md).
 
@@ -66,7 +68,8 @@ when `ssh-add -L` doesn't list the key: nazar offers a program only the keys its
 **Secrets**:
 - Never put a secret value on a command line, in a file, a log, a commit or your output. Never ask
   the user to paste one to you. Prefer telling the user to run `nazar secret add NAME` themselves
-  (a hidden prompt); never add a secret the user did not ask you to store.
+  (a hidden prompt on macOS; on Linux they pipe it); never add a secret the user did not ask you
+  to store.
 - Moving a secret out of a shell profile or `.env` file: never read or print the file's lines.
   Find only the line number (`grep -n '^export NAME=' ~/.zshrc | cut -d: -f1`). The user runs
   `printf '%s' "$NAME" | nazar secret add NAME` in a shell that has it, then deletes that line
@@ -100,6 +103,33 @@ let them apply them. `nazar status` prints `setup:` lines with fixes: show them,
 it prints the command to run), 3 refused (don't retry), 4 staged (the prompt could not be shown;
 the user runs `nazar config apply`), 5 nazar-agent not running (`nazar install`).
 
+**On Linux** (a preview; keys in the TPM) every rule here applies. What differs:
+- `login` asks for the user's password at the system's prompt where this file says Touch ID; `dialog`
+  is a zenity or kdialog window. Messages say "your password", "the screen" and "enforced by nazar"
+  (`<name> asks on every use (enforced by nazar)`; `the screen is locked; <name> signs only while it's
+  unlocked`, which waits for the user to unlock). `no polkit authentication agent for this session`
+  and `no graphical session for the dialog` are errors: tell the user, don't retry.
+- Any program running as the user could read `~/.nazar` and use `/dev/tpmrm0` without a prompt. That
+  is a weakness of Linux v1, not a permission. Never use the TPM or the vault files directly, edit
+  anything under `~/.nazar`, set the session's `LockedHint`, or raise a polkit prompt yourself.
+- `--always-ask` and `--only-when-unlocked` are not "fixed for the key's life" on Linux: they are two
+  bytes of the key's record that nazar reads on every use (enforced by nazar from the key's record).
+  Treat them as the user's choice all the same; never edit the record.
+- `signed:` is macOS only and refused. Suggest `app:<app-id>` (a desktop entry's file name without
+  `.desktop`; the executable's hash is pinned) or `path:<file>`, for example
+  `nazar ssh-key rule add github --apps app:org.gnome.Terminal --gate login --scope session`.
+- An `app:` rule stops matching after every update of the app: find out why (the package manager's
+  log; there is no `codesign`), and print `nazar trust --app <app-id>` for the user only if an update
+  explains it. A Flatpak, Snap or script-wrapped app and a `Terminal=true` entry have no `app:`
+  identity: `nazar apps list` says why, with no fix; suggest a `path:` rule.
+- `nazar run` exits 1 and runs nothing: no rule changes that. Suggest `helper` or `stdout` delivery.
+  `nazar ui` exits 1 too.
+- `secret add` at a terminal exits 2 and reads nothing (no hidden prompt on Linux). The user pipes
+  the value: `printf '%s' "$NAME" | nazar secret add NAME`.
+- `… (it was upgraded or replaced); run nazar install` is setup: tell the user, who runs it once they
+  know what replaced the file.
+- `nazar log` reads `~/.nazar/log/audit.log`, which any program of the user can write: it is no proof.
+
 ## Setup checklist
 
 Walk the user through these; they run the commands that prompt and make the edits.
@@ -112,6 +142,19 @@ Walk the user through these; they run the commands that prompt and make the edit
    Upgrades (`brew upgrade nazar`) keep keys. A build from source is a different signature, so
    its keys don't carry over to the Homebrew one or back
    ([guide, Quick start](https://github.com/atas/nazar/blob/main/docs/GUIDE.md#quick-start)).
+
+   On Linux (a systemd desktop with a TPM 2.0; the user runs these, and logs out and back in after
+   the second):
+   ```bash
+   brew install atas/tap/nazar-linux             # or the release's install.sh, which prints the next lines
+   sudo "$(command -v nazar)" install --system   # once per user
+   nazar install --no-links                      # after install.sh: nazar install; again after every upgrade
+   ```
+   The `sudo` line runs a file the user owns as root and is always theirs to run, right after an
+   install they checked against `SHA256SUMS`; never print it from a later error without saying to
+   check the file first. On Linux any program running as the user can read every secret, and the
+   keys work for whoever holds the machine unless the disk is encrypted.
+   [The guide's Linux section](https://github.com/atas/nazar/blob/main/docs/CLI.md#linux) has the rest.
 2. **Check**: `nazar status` (or `nazar --json status`, field `setup`). Each `setup:` line names
    what of ssh and git isn't wired to nazar, with the fix. Run it again after each step. Lines
    from an older nazar (`~/.nazar/agent.sock`, `~/.config/nazar/keys`) get their replacement.
@@ -129,7 +172,9 @@ Walk the user through these; they run the commands that prompt and make the edit
    `ControlMaster no`: a persisted master connection detaches from the terminal, so its requests
    have no app and match only `any`/`unknown` rules. Test with `ssh -T git@github.com`.
 5. **Git commit signing** (show it; the user runs it). Use the absolute path of the link
-   (from a source build, `$HOME/.local/bin/nazar-sign-git`):
+   (from a source build or Linux's `install.sh`, `$HOME/.local/bin/nazar-sign-git`; under Homebrew
+   on Linux, `$(brew --prefix)/bin/nazar-sign-git`, by default
+   `/home/linuxbrew/.linuxbrew/bin/nazar-sign-git`):
    ```bash
    git config --global gpg.format ssh
    git config --global gpg.ssh.program "$(brew --prefix)/bin/nazar-sign-git"
@@ -137,8 +182,10 @@ Walk the user through these; they run the commands that prompt and make the edit
    git config --global commit.gpgsign true
    ```
 6. **HTTPS tokens for git** (optional): the user stores the token (`nazar secret add GITHUB_PERSONAL_ACCESS_TOKEN`,
-   hidden prompt), adds `deliver: [helper]`, `helper: {git: {host: github.com, username: <login>}}`
-   and a rule with `to:` git's HTTPS transport (`signed:apple:com.apple.git-remote-http`) to its
+   hidden prompt on macOS; piped on Linux), adds `deliver: [helper]`,
+   `helper: {git: {host: github.com, username: <login>}}`
+   and a rule with `to:` git's HTTPS transport (`signed:apple:com.apple.git-remote-http`; on Linux
+   `path:` of `git-remote-http` in the folder `git --exec-path` prints) to its
    entry in `config.yaml`, runs `nazar config apply` (Touch ID), and makes nazar git's helper:
    ```bash
    git config --global --replace-all credential.https://github.com.helper ""
@@ -279,7 +326,7 @@ or `nazar --json secret list`; first match wins):
   (`open -a Terminal x.command` really is Terminal). Suggest `scope: session` instead.
 
 **Secrets.**
-- Store: the user runs `nazar secret add NAME` (hidden prompt) or pipes it
+- Store: the user runs `nazar secret add NAME` (hidden prompt, macOS only) or pipes it
   (`nazar secret add NAME < file`); `--only-when-unlocked` as for keys. `nazar secret rm NAME`
   erases it (config entry kept); to change a value, `rm` and `add` again.
 - **Keep the value out of the process table.** Any program running as the user can read every
@@ -297,7 +344,7 @@ or `nazar --json secret list`; first match wins):
   (in every child's startup environment), or writing it to a file, a log or your output.
 - A script: `nazar get NAME` prints the value; the entry needs `stdout` in `deliver` and a rule
   whose `to:` names the script's interpreter.
-- An MCP server (or any `node`, `python3`, `npx` program): `nazar run --secret NAME -- npx -y <package>`
+- An MCP server (or any `node`, `python3`, `npx` program; macOS only): `nazar run --secret NAME -- npx -y <package>`
   as the server's command, with nazar's absolute path (`command -v nazar`) as `"command"` in
   `~/.claude.json` and no `env` block. The entry needs `deliver: [late-env]` and a rule with
   `to: [{command: [npx, -y, "<package>"]}]`; if node comes from mise or asdf, its real folder in
@@ -350,8 +397,8 @@ forgets remembered approvals at once.
 
 **Why was this refused?** `nazar log --since 10m --decision blocked`, or
 `nazar log --since 1h --target github` (`ssh:<key>`, `secret:<name>`, `k8s:<context>`, `aws:<name>`),
-`--caller claude`, `--decision denied|timeout|error`; `nazar log summary --since 7d`. The log
-needs an admin account. `nazar status` shows current approvals, a staged change and config
+`--caller claude`, `--decision denied|timeout|error`; `nazar log summary --since 7d`. On macOS the
+log needs an admin account. `nazar status` shows current approvals, a staged change and config
 warnings; `nazar config check` validates `config.yaml` without applying it. After an upgrade it
 may report `"Apple" matches nothing; Apple's team is written apple`: that matcher never matched,
 and `apple` would match every Apple program, so tell the user and let them choose; don't fix it.
