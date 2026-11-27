@@ -10,7 +10,13 @@ concurrency:
 
 jobs:
     review:
-        if: github.event.pull_request.draft == false && github.event.pull_request.head.repo.full_name == github.repository
+        # Dependabot's own pushes are not reviewed: its runs get none of the repo's secrets, so the
+        # review can never run and every bump would wait for a person. The tests are the gate for
+        # those. A commit a person adds to its branch is reviewed like any other.
+        if: >-
+            github.event.pull_request.draft == false &&
+            github.event.pull_request.head.repo.full_name == github.repository &&
+            !(github.event.pull_request.user.login == 'dependabot[bot]' && github.actor == 'dependabot[bot]')
         runs-on: ubuntu-latest
         timeout-minutes: 90
         permissions:
